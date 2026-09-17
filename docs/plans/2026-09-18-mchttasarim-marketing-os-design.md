@@ -107,12 +107,36 @@ analysis_jobs      (id, business_id→businesses, status,
                     stages_status JSONB,   -- {"places":"success","website":"success","instagram":"failed","seo":"pending"}
                     started_at, completed_at)
 
+business_metrics   (id, business_id→businesses, analysis_job_id→analysis_jobs,
+                    metric_key,   -- google_rating | google_review_count | review_response_rate | https_enabled |
+                                  -- mobile_usability_score | title_present | h1_present | meta_description_present |
+                                  -- image_optimization_score | page_load_ms | cta_present | whatsapp_link_present |
+                                  -- phone_link_present | reservation_link_present | schema_markup_present |
+                                  -- social_last_post_days_ago | ...
+                    value JSONB, unit,
+                    status[measured|unknown|unverified|not_available],   -- ölçülemiyorsa asla tahmini değer üretilmez
+                    source, collected_at)
+
 findings           (id, business_id→businesses, analysis_job_id→analysis_jobs,
                     category[website|gbp|social|seo|ads|visual|print],
+                    finding TEXT,              -- kısa, somut tespit etiketi (ör. "Web sitesi HTTPS kullanmıyor")
                     severity[none|low|medium|high],
-                    evidence TEXT, source[places|website_crawl|pagespeed|social|ai_interpretation|manual],
+                    evidence TEXT,             -- tespitin dayandığı somut veri/alıntı
+                    source[places|website_crawl|pagespeed|social|ai_interpretation|manual],
                     confidence[low|medium|high],
-                    detected_at, raw_data JSONB)
+                    detected_at,
+                    based_on_metric_ids INT[],         -- hangi business_metrics kayıtlarına dayandığı
+                    business_impact TEXT,               -- bu eksikliğin işletmeye somut etkisi
+                    mchttasarim_opportunity TEXT,        -- bu bulgunun Mchttasarım için ne anlama geldiği
+                    recommended_service_ids INT[]→services_catalog,  -- bu bulguya bağlı hizmet önerileri
+                    raw_data JSONB)
+
+competitor_snapshots (id, business_id→businesses,          -- ana işletme
+                    competitor_business_id→businesses,      -- aynı bölge/sektörden, zaten Discovery'de bulunan işletme
+                    metric_key, value JSONB, status[measured|unknown|unverified|not_available],
+                    source, collected_at)
+                    -- Faz 1: sadece Discovery verisiyle (rating, review_count, photo_count) yan yana karşılaştırma
+                    -- Faz 2: SEO/sosyal derin metriklerle genişler
 
 opportunity_scores (id, business_id, analysis_job_id,
                     dimension[web|seo|google_visibility|social|ads|design|print],
@@ -165,8 +189,10 @@ POST   /api/businesses/analyze-bulk           # {business_ids[]} veya {top_n:10,
 GET    /api/analysis-jobs/{id}                # stage bazlı durum
 
 GET    /api/businesses/{id}/findings
+GET    /api/businesses/{id}/metrics                   # ölçülebilir business_metrics kayıtları (status dahil)
 GET    /api/businesses/{id}/opportunity-scores
 GET    /api/businesses/{id}/service-recommendations
+GET    /api/businesses/{id}/competitors               # Faz 1: aynı bölge/sektörden Discovery verisiyle yan yana metrik karşılaştırması
 
 POST   /api/businesses/{id}/proposals         # son analizden teklif taslağı üret
 PATCH  /api/proposals/{id}                    # fiyat/metin düzenleme
@@ -217,16 +243,24 @@ Her aşamanın girdi/çıktısı `analysis_jobs` ve `findings`/`service_recommen
 **Kanıt zorunluluğu (madde 12'nin karşılığı):** Her `Finding` şu yapıyı taşır ve panelde bu haliyle gösterilir:
 
 ```
-finding:
-  category: website
-  severity: high
-  evidence: "İşletme için Google Places kaydında web sitesi alanı boş."
-  source: places
-  confidence: high
-  detected_at: 2026-09-18T09:12:00Z
+category: website
+finding: "Web sitesi tespit edilemedi"
+severity: high
+evidence: "Google Places kaydında website alanı boş (place_id: ChIJ...)."
+source: places
+confidence: high
+detected_at: 2026-09-18T09:12:00Z
+based_on_metric_ids: [4231]                 -- business_metrics.website_present = not_available
+business_impact: "İşletme aramalarda ve sosyal medya bio/link alanlarında yönlendirebileceği bir dijital adrese sahip değil; potansiyel müşteri kaybı yaşanıyor."
+mchttasarim_opportunity: "Web sitesi olmayan işletme, Mchttasarım'ın web tasarım hizmeti için doğrudan aday."
+recommended_service_ids: [12]               -- services_catalog: Web Tasarım
 ```
 
+"SEO geliştirilebilir" gibi genel/ölçülemeyen ifadeler tek başına bir Finding oluşturamaz — her Finding en az bir `business_metrics` kaydına (`based_on_metric_ids`) veya doğrudan bir Discovery/crawl alanına dayanmak zorundadır (kod seviyesinde zorunlu kılınır, boşsa Finding reddedilir). Ölçülemeyen/toplanamayan veriler `business_metrics.status` alanında `unknown` / `unverified` / `not_available` olarak açıkça işaretlenir; asla tahmini bir değerle doldurulmaz.
+
 AI yorumu gerektiren bulgular (ör. "sosyal medya içerik kalitesi düşük") `source: ai_interpretation` ve genelde `confidence: medium/low` ile işaretlenir — asla `places`/`website_crawl` gibi doğrulanmış kaynaklarla aynı güven seviyesinde sunulmaz. Doğrulanamayan hiçbir bilgi "kesin" gibi yazılmaz; belirsizse finding `confidence: low` + evidence içinde "doğrulama gerekiyor" notuyla işaretlenir.
+
+Her önerilen hizmet, panelde ayrı ayrı şu dört alanla gösterilir: **hangi bulgu** (`finding`) → **hangi kanıt** (`evidence`) → **beklenen iş amacı** (`business_impact`) → **önerilen hizmet** (`recommended_service_ids` üzerinden `services_catalog`'a çözülür). Bu dörtlü, `service_recommendations.matched_rule` alanında da tekrarlanır.
 
 ---
 
@@ -260,6 +294,8 @@ group([
 ```
 
 `analysis_jobs.stages_status` her alt görevin sonucunu ayrı ayrı tutar (`{"places":"success","website":"success","instagram":"failed","seo":"pending"}`), panel bunu olduğu gibi gösterir (madde 12: kısmi sonuç şeffaflığı). Başarısız/bekleyen aşamalar için de bir "finding" üretilir (ör. `category: social, severity: none, evidence: "Instagram verisi toplanamadı", source: manual, confidence: low`) — sessizce atlanmaz.
+
+**Temel rakip karşılaştırması (MVP kapsamına alındı):** Discovery zaten aynı bölge/sektördeki tüm işletmeleri topladığı için, `task_google_profile_enrich` sonrasında ek bir API çağrısı yapılmadan, aynı `region_id`+`sector_id`'deki diğer `businesses` kayıtları arasından (analiz edilen işletme hariç) en yakın 3-5 rakip seçilir ve `rating`/`review_count`/`photo_count` gibi zaten Discovery'de mevcut alanlar `competitor_snapshots`'a yazılır. Bu, maliyet artırmadan (madde 13) yan yana karşılaştırma sağlar. SEO/sosyal medya bazlı **derin** rakip analizi (ayrı ücretli veri kaynağı gerektirir) Faz 2'de eklenir.
 
 ---
 
@@ -305,7 +341,7 @@ Durumlar: `Yeni → Analiz bekliyor → Analiz edildi → İletişime geçilecek
 |---|---|
 | 0 | Repo, docker-compose, DB migration altyapısı, `.env` iskeleti, `integrations_registry` seed |
 | 1 | Region/Sector taxonomy + Discovery pipeline (Google Places) + işletme listesi ekranı |
-| 2 | İşletme detay sayfası + temel veri gösterimi + Analysis pipeline iskeleti (henüz AI yok — sadece Places+website stage + deterministic Finding üretimi) |
+| 2 | İşletme detay sayfası + temel veri gösterimi + Analysis pipeline iskeleti (henüz AI yok — sadece Places+website stage + deterministic Finding üretimi) + temel rakip karşılaştırması (aynı bölge/sektörden Discovery verisiyle, ek API çağrısı olmadan) |
 | 3 | Service Catalog + Rule Engine + Opportunity Scoring (boyut skorları, gerekçeler, satış önceliği) — tamamen deterministik |
 | 4 | AI Orchestration entegrasyonu (Claude ile yorumlama, önceliklendirme, satış yaklaşımı metni) |
 | 5 | Teklif sistemi (proposal generation + PDF) + CRM stage yönetimi + activity log |
@@ -371,12 +407,32 @@ Toplam maliyet kabaca: `(taranan işletme × derin analiz oranı × işletme ba�
 ```
 Bölge seç → Sektör seç → İşletme bul (Discovery) → İşletme listesi
 → İşletme detayını aç → Analiz başlat (Places + Website + Social-link stage'leri)
-→ Evidence Extraction (deterministik Finding'ler) → Rule Engine (aday hizmetler)
-→ AI Analysis (yorumlama + önceliklendirme, sadece Finding'lere dayanarak)
-→ Fırsat skorları + Satış önceliği → Teklif oluştur → PDF → CRM'e kaydet
+→ Evidence Extraction (business_metrics + deterministik Finding'ler) → temel rakip karşılaştırması (Discovery verisiyle)
+→ Rule Engine (aday hizmetler) → AI Analysis (yorumlama + önceliklendirme, sadece Finding'lere dayanarak)
+→ Fırsat skorları (boyut bazlı) + Satış önceliği → Teklif oluştur → PDF → CRM'e kaydet
 ```
 
-Faz 2: rakip analizi, SEO analizi, sosyal medya derinlemesine analiz, PDF rapor geliştirme, gelişmiş teklif sistemi.
+Faz 2: derin rakip analizi (SEO/sosyal veri sağlayıcılarla), SEO analizi, sosyal medya derinlemesine analiz, PDF rapor geliştirme, gelişmiş teklif sistemi.
 Faz 3: Google Ads / Meta Ads taslakları, içerik planlama, aylık raporlama.
 Faz 4: OAuth, Google Business Profile bağlantısı, Google Ads API, Meta Marketing API, gelişmiş otomasyon.
+
+---
+
+## Kabul Kriterleri (2026-09-18'de onaylandı, tüm sprintler için bağlayıcı)
+
+1. Kanıtsız hiçbir Finding oluşturulamaz — kod seviyesinde `based_on_metric_ids` veya doğrudan kaynak alanı boşsa Finding reddedilir.
+2. Her Finding zorunlu alanları taşır: `category, severity, finding, evidence, source, confidence, detected_at, business_impact, mchttasarim_opportunity, recommended_service_ids`.
+3. Genel/ölçülemeyen ifadeler ("SEO geliştirilebilir" vb.) tek başına Finding olamaz; somut metrik/kanıta bağlanmalı.
+4. Mümkün olan her yerde `business_metrics` tablosundaki ölçülebilir alanlar kullanılır (rating, review_count, review_response_rate, https, mobile usability, title/H1/meta, image optimization, page load, CTA, WhatsApp/telefon/rezervasyon linki, schema/local SEO, sosyal güncellik, rakip metrikleri).
+5. Doğrulanamayan veri `unknown/unverified/not_available` ile işaretlenir, asla tahmini üretilmez.
+6. AI yorumları (`source: ai_interpretation`) gerçek kaynak verisinden (`places/website_crawl/pagespeed/social`) her zaman ayrı gösterilir.
+7. Her önerilen hizmet: bulgu → kanıt → beklenen iş amacı → önerilen hizmet dörtlüsüyle gösterilir.
+8. Rule Engine deterministik aday üretir; AI sadece yorumlar/önceliklendirir, yeni problem/hizmet uyduramaz (kod seviyesinde doğrulanır).
+9. Opportunity Score boyut bazlı gösterilir (web/SEO/Google görünürlüğü/sosyal/reklam/tasarım/matbaa), gerekçeleriyle birlikte.
+10. Competitor Analysis'te işletme ve rakipler aynı `metric_key`'ler üzerinden yan yana (`competitor_snapshots`) gösterilir.
+11. Her dış veri kaynağı kaydı `source` ve `collected_at/detected_at` taşır.
+12. API hatası/veri eksikliği sahte veriyle doldurulmaz; `stages_status` üzerinden partial result + açık hata gösterilir.
+13. Kullanıcı onayı olmadan toplu/pahalı deep analysis çalıştırılmaz (`analyze-bulk` her zaman açık seçim veya `top_n` gerektirir).
+14. Google/Meta entegrasyonlarında resmi API/OAuth/kota/ToS'a uygun mimari; scraping varsayılan çözüm değildir.
+15. MVP kapsamı: region/sector seçimi, discovery, business list/detail, evidence-based analysis, temel competitor comparison, service matching, opportunity dashboard, CRM, proposal generation.
 
