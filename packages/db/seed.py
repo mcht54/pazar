@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from packages.db.base import SessionLocal
-from packages.db.models import Region, Sector, IntegrationRegistry
+from packages.db.models import Region, Sector, IntegrationRegistry, ServiceCatalog
 
 REGIONS = [
     # name, level, parent_name, center_lat, center_lng, search_radius_m
@@ -28,6 +28,88 @@ SECTORS = [
     ("Emlak", ["real_estate_agency"], ["emlak", "emlakçı"]),
     ("Otomotiv Servisi", ["car_repair"], ["oto servis", "oto tamir", "lastikçi"]),
     ("Mobilya", ["furniture_store"], ["mobilya", "mobilyacı"]),
+]
+
+SERVICES = [
+    # service_name, description, target_sectors([] = hepsi), sales_arguments, deliverables
+    (
+        "Web Tasarım",
+        "Kurumsal/tanıtım web sitesi tasarımı ve geliştirmesi.",
+        [],
+        ["Web sitesi olmayan işletmeler aramalarda ve sosyal medya bio linklerinde görünmez.",
+         "Mevcut siteye erişilemiyorsa müşteri kaybı riski var."],
+        ["Responsive web sitesi", "İletişim/CTA entegrasyonu", "Temel SEO altyapısı"],
+    ),
+    (
+        "E-ticaret Sitesi",
+        "Online satış yapılabilen e-ticaret altyapısı kurulumu.",
+        [],
+        ["Ürün/hizmet satışını dijitale taşımak isteyen işletmeler için."],
+        ["E-ticaret sitesi", "Ödeme entegrasyonu", "Ürün kataloğu"],
+    ),
+    (
+        "SEO",
+        "Arama motoru optimizasyonu — on-page ve teknik SEO iyileştirmeleri.",
+        [],
+        ["Meta description/H1/schema gibi temel SEO sinyalleri eksikse arama görünürlüğü düşer."],
+        ["On-page SEO denetimi", "Meta etiket optimizasyonu", "Yapılandırılmış veri (schema) ekleme"],
+    ),
+    (
+        "Google Ads",
+        "Google arama/görüntülü reklam kampanyaları.",
+        [],
+        ["Ticari niyeti yüksek aramalarda rakiplerin reklam verdiği sektörlerde görünürlük sağlar."],
+        ["Kampanya taslağı", "Anahtar kelime araştırması", "Reklam metni"],
+    ),
+    (
+        "Sosyal Medya Yönetimi",
+        "Instagram/Facebook içerik planlama ve yönetimi.",
+        [],
+        ["Sosyal medya hesabına ulaşılamıyor veya düzensizse marka bilinirliği zayıf kalır."],
+        ["Aylık içerik planı", "Görsel/metin üretimi", "Paylaşım takvimi"],
+    ),
+    (
+        "Google Business Optimizasyonu",
+        "Google Business Profili eksiklerinin giderilmesi (fotoğraf, açıklama, yorum yönetimi).",
+        [],
+        ["Düşük yorum sayısı veya az fotoğraf, Google Haritalar'da rekabeti zayıflatır."],
+        ["Profil düzenleme", "Fotoğraf yükleme", "Yorum yönetimi süreci"],
+    ),
+    (
+        "Grafik Tasarım",
+        "Kurumsal kimlik, sosyal medya ve baskı görselleri tasarımı.",
+        [],
+        ["Az sayıda/eski görsel varlık, dijital ve fiziksel iletişimde profesyonellik algısını zayıflatır."],
+        ["Logo/kurumsal kimlik", "Sosyal medya görselleri", "Baskı tasarımları"],
+    ),
+    (
+        "Matbaa",
+        "Kartvizit, broşür, katalog gibi baskı ürünleri.",
+        [],
+        ["Fiziksel tanıtım materyaline ihtiyaç duyan işletmeler için."],
+        ["Kartvizit", "Broşür/katalog baskısı"],
+    ),
+    (
+        "Branda Baskı",
+        "Tabela, branda ve büyük format baskı uygulamaları.",
+        [],
+        ["Fiziksel mekan tanıtımı için görsel materyal ihtiyacı olan işletmeler için."],
+        ["Branda baskı ve montaj"],
+    ),
+    (
+        "Promosyon Ürünleri",
+        "Marka logolu promosyon/hediyelik ürün üretimi.",
+        [],
+        ["Müşteri sadakati ve marka bilinirliği için promosyon ürünleri."],
+        ["Promosyon ürün tasarımı ve üretimi"],
+    ),
+    (
+        "Tabela ve Reklam Uygulamaları",
+        "İşletme tabelası ve dış mekan reklam uygulamaları.",
+        [],
+        ["Fiziksel görünürlüğü zayıf işletmeler için tabela/dış mekan reklamı."],
+        ["Tabela tasarımı ve uygulaması"],
+    ),
 ]
 
 INTEGRATIONS = [
@@ -93,13 +175,31 @@ def run():
             if sector is None:
                 db.add(Sector(name=name, google_place_types=place_types, keyword_variants=keywords))
 
+        for service_name, description, target_sectors, sales_arguments, deliverables in SERVICES:
+            service = db.query(ServiceCatalog).filter_by(service_name=service_name).one_or_none()
+            if service is None:
+                db.add(
+                    ServiceCatalog(
+                        service_name=service_name,
+                        description=description,
+                        target_sectors=target_sectors,
+                        required_signals={},
+                        opportunity_rules={},
+                        sales_arguments=sales_arguments,
+                        deliverables=deliverables,
+                    )
+                )
+
         for integration in INTEGRATIONS:
             stmt = pg_insert(IntegrationRegistry).values(**integration)
             stmt = stmt.on_conflict_do_update(index_elements=["name"], set_=integration)
             db.execute(stmt)
 
         db.commit()
-        print(f"Seed OK: {len(REGIONS)} region, {len(SECTORS)} sector, {len(INTEGRATIONS)} integration_registry kaydı.")
+        print(
+            f"Seed OK: {len(REGIONS)} region, {len(SECTORS)} sector, {len(SERVICES)} service, "
+            f"{len(INTEGRATIONS)} integration_registry kaydı."
+        )
     finally:
         db.close()
 

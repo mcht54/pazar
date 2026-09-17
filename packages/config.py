@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     google_pagespeed_api_key: str = ""
 
+    discovery_provider: str = "mock"  # mock | google
+    ai_provider: str = "none"  # none | claude — ANTHROPIC_API_KEY yoksa "none" kalmalı
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]

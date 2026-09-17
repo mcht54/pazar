@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Mchttasarım Marketing OS",
   description: "Mchttasarım Reklam Ajansı için AI destekli pazarlama operasyon platformu",

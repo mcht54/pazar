@@ -93,11 +93,13 @@ class DiscoveryJob(Base):
     region_id: Mapped[int] = mapped_column(ForeignKey("regions.id"), nullable=False)
     sector_id: Mapped[int] = mapped_column(ForeignKey("sectors.id"), nullable=False)
     target_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
-    # queued | running | completed | completed_with_errors | failed
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    # pending | running | completed | partial | failed
     found_new: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     found_existing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    item_errors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # [{"external_ref": "...", "reason": "..."}] — provider tarafında tekil kayıt hataları (partial failure)
     requested_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -118,9 +120,11 @@ class AnalysisJob(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="queued")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    # pending | running | completed | partial | failed
     stages_status: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    # {"places": "success", "website": "success", "instagram": "failed", "seo": "pending"}
+    # {"places": "success", "website": "success", "social": "failed", "evidence_extraction": "success",
+    #  "rule_engine": "success", "scoring": "success", "competitor": "success", "ai_interpretation": "skipped"}
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -136,7 +140,7 @@ class BusinessMetric(Base):
     value: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     unit: Mapped[str | None] = mapped_column(String(30), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    # measured | unknown | unverified | not_available
+    # known | unknown | unverified | not_available
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -170,6 +174,7 @@ class CompetitorSnapshot(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
+    analysis_job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id"), nullable=True)
     competitor_business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
     metric_key: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -186,7 +191,9 @@ class OpportunityScore(Base):
     analysis_job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id"), nullable=True)
     dimension: Mapped[str] = mapped_column(String(30), nullable=False)
     # web | seo | google_visibility | social | ads | design | print
-    score: Mapped[int] = mapped_column(Integer, nullable=False)  # 0-100
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-100; NULL ise insufficient_data
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="scored")
+    # scored | insufficient_data — kanıt yoksa skor uydurulmaz, insufficient_data ile işaretlenir
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
     based_on_finding_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False, default=list)
 

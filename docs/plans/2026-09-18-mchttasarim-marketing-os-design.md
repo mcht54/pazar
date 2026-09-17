@@ -114,7 +114,7 @@ business_metrics   (id, business_id→businesses, analysis_job_id→analysis_job
                                   -- phone_link_present | reservation_link_present | schema_markup_present |
                                   -- social_last_post_days_ago | ...
                     value JSONB, unit,
-                    status[measured|unknown|unverified|not_available],   -- ölçülemiyorsa asla tahmini değer üretilmez
+                    status[known|unknown|unverified|not_available],   -- ölçülemiyorsa asla tahmini değer üretilmez
                     source, collected_at)
 
 findings           (id, business_id→businesses, analysis_job_id→analysis_jobs,
@@ -133,7 +133,7 @@ findings           (id, business_id→businesses, analysis_job_id→analysis_job
 
 competitor_snapshots (id, business_id→businesses,          -- ana işletme
                     competitor_business_id→businesses,      -- aynı bölge/sektörden, zaten Discovery'de bulunan işletme
-                    metric_key, value JSONB, status[measured|unknown|unverified|not_available],
+                    metric_key, value JSONB, status[known|unknown|unverified|not_available],
                     source, collected_at)
                     -- Faz 1: sadece Discovery verisiyle (rating, review_count, photo_count) yan yana karşılaştırma
                     -- Faz 2: SEO/sosyal derin metriklerle genişler
@@ -266,7 +266,7 @@ Her önerilen hizmet, panelde ayrı ayrı şu dört alanla gösterilir: **hangi 
 
 ## 6. Discovery Pipeline (Bölge → İşletme Listesi)
 
-1. Frontend `POST /api/discovery/jobs` → `DiscoveryJob(status=queued)` oluşturulur, Celery kuyruğuna atılır, `job_id` hemen döner.
+1. Frontend `POST /api/discovery/jobs` → `DiscoveryJob(status=pending)` oluşturulur, Celery kuyruğuna atılır, `job_id` hemen döner. Job durumları: `pending → running → completed | partial | failed` (partial: bazı işletmeler başarısız/eksik ama en az biri başarılı).
 2. Worker, `region_id`'yi `regions` tablosundan lat/lng + yarıçapa, `sector_id`'yi Google Places kategori kodu + Türkçe anahtar kelime varyasyonlarına çözer.
 3. `integrations/google_places/policy.py`'de tanımlı kota/rate-limit'e göre Nearby/Text Search çağrılır; her çağrı `api_usage_ledger`'a işlenir.
 4. Yeni işletme adaylarında Place Details çağrısı yapılır (telefon, web sitesi, adres, puan, yorum sayısı, kategori, konum — **sadece izinli Discovery Data alanları**); sonuç `policy.py`'deki `cache_ttl_by_field`'a göre Redis'te önbelleklenir.
