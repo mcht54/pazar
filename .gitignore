@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+node_modules/
+.next/
+out/
+
+.env
+*.local
+
+.DS_Store
+*.log
+
+# local dev artifacts
+/infra/pgdata/
