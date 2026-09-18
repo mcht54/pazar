@@ -32,8 +32,9 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 ]
-REQUEST_TIMEOUT_SECONDS = 30.0
-MAX_RETRIES = 4
+OVERPASS_INTERNAL_TIMEOUT_SECONDS = 40
+REQUEST_TIMEOUT_SECONDS = 50.0
+MAX_RETRIES = 3
 RETRY_BACKOFF_BASE_SECONDS = 3.0
 MIN_INTERVAL_BETWEEN_REQUESTS_SECONDS = 2.0
 USER_AGENT = "MchttasarimMarketingOS/0.1 (local use; +https://mchttasarim.com)"
@@ -59,15 +60,17 @@ def _build_query(lat: float, lng: float, radius_m: int, osm_tags: list[str], key
         clauses.append(f'way["{key}"="{value}"](around:{radius_m},{lat},{lng});')
 
     if keywords:
+        # Not: regex ("~") araması Overpass'ta etiket indeksini kullanamaz, bu yüzden
+        # tag bazlı aramadan çok daha yavaştır. Maliyeti kontrol altında tutmak için
+        # sadece node üzerinde (way'de değil) ve tek bir alternation olarak çalıştırılır.
         pattern = "|".join(re.escape(k) for k in keywords)
         clauses.append(f'node["name"~"{pattern}",i](around:{radius_m},{lat},{lng});')
-        clauses.append(f'way["name"~"{pattern}",i](around:{radius_m},{lat},{lng});')
 
     if not clauses:
         raise ValueError("Sektör için ne osm_tags ne de keyword_variants tanımlı — sorgu oluşturulamaz.")
 
     body = "\n  ".join(clauses)
-    return f"[out:json][timeout:25];\n(\n  {body}\n);\nout center tags;"
+    return f"[out:json][timeout:{OVERPASS_INTERNAL_TIMEOUT_SECONDS}];\n(\n  {body}\n);\nout center tags;"
 
 
 def _extract_address(tags: dict) -> str | None:
