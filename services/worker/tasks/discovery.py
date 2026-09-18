@@ -122,35 +122,34 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
 
     provider = get_places_provider(db)
 
+    counters = {"found_new": 0, "found_existing": 0}
+    item_errors: list[dict] = []
+
+    def _process_batch(batch: list[PlaceResult]) -> None:
+        """Sağlayıcıdan bir veri grubu (sayfa/genişletme denemesi) geldikçe hemen DB'ye
+        yazar ve commit eder — kullanıcı arama bitmeden sonuçları görebilsin diye."""
+        for item in batch:
+            if not item.success:
+                item_errors.append({"external_ref": item.external_ref, "reason": item.error_reason})
+                continue
+            business, is_new = _upsert_business(db, region, sector, item, source=provider.name)
+            _link_job_result(db, job, business)
+            counters["found_new" if is_new else "found_existing"] += 1
+        job.found_new = counters["found_new"]
+        job.found_existing = counters["found_existing"]
+        job.item_errors = list(item_errors)
+        db.commit()
+
     try:
-        outcome: SearchOutcome = provider.search(region=region, sector=sector, target_count=job.target_count)
+        outcome: SearchOutcome = provider.search(
+            region=region, sector=sector, target_count=job.target_count, on_batch=_process_batch
+        )
     except Exception as exc:  # provider tamamen ulaşılamaz durumda (kota, ağ, config hatası)
         job.status = "failed"
         job.error_message = str(exc)
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
         return job
-
-    found_new = 0
-    found_existing = 0
-    item_errors: list[dict] = []
-
-    for item in outcome.items:
-        if not item.success:
-            item_errors.append({"external_ref": item.external_ref, "reason": item.error_reason})
-            continue
-
-        business, is_new = _upsert_business(db, region, sector, item, source=outcome.provider_name)
-        _link_job_result(db, job, business)
-
-        if is_new:
-            found_new += 1
-        else:
-            found_existing += 1
-
-    job.found_new = found_new
-    job.found_existing = found_existing
-    job.item_errors = item_errors
 
     total_attempted = len(outcome.items)
     total_failed = len(item_errors)

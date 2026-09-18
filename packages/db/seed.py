@@ -1,11 +1,20 @@
-"""Seed data: regions (6 şehir + Sakarya'nın 16 ilçesi), 50+ sektör (OpenStreetMap
-etiketleri + Türkçe anahtar kelimelerle), Mchttasarım hizmet kataloğu, integrations_registry.
+"""Seed data: Türkiye'nin 81 ili + tüm ilçeleri (statik veri dosyasından), 55+ sektör
+(OpenStreetMap etiketleri + Türkçe anahtar kelimelerle), Mchttasarım hizmet kataloğu,
+integrations_registry.
 
 Run with: python -m packages.db.seed
 Idempotent: safe to re-run (var olan kayıtları isim/natural-key ile günceller, yenilerini ekler).
+
+İl/ilçe verisi packages/db/data/turkey_locations.json dosyasında statik olarak tutulur —
+uygulama çalışırken bu veri hiçbir zaman internetten aranmaz. Kaynak: TürkiyeAPI (2025
+resmi il/ilçe listesi, https://turkiyeapi.dev) + ilçe koordinatları OpenStreetMap Nominatim
+ile tek seferlik geocode edilmiştir (bkz. dosyadaki `geocode_source` alanı).
 """
 
+import json
+import math
 from datetime import date
+from pathlib import Path
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -13,33 +22,72 @@ from sqlalchemy.exc import IntegrityError
 from packages.db.base import SessionLocal
 from packages.db.models import Region, Sector, IntegrationRegistry, ServiceCatalog, Business
 
-REGIONS = [
-    # name, level, parent_name, center_lat, center_lng, search_radius_m
-    ("Sakarya", "il", None, 40.7569, 30.3781, 20000),
-    ("Kocaeli", "il", None, 40.7654, 29.9408, 20000),
-    ("İstanbul", "il", None, 41.0082, 28.9784, 25000),
-    ("Bursa", "il", None, 40.1826, 29.0665, 20000),
-    ("Ankara", "il", None, 39.9334, 32.8597, 20000),
-    ("İzmir", "il", None, 38.4237, 27.1428, 20000),
-    # Sakarya ilçeleri — koordinatlar ilçe merkezine yakın kabul edilir; search_radius_m
-    # bu yaklaşıklığı telafi edecek şekilde seçilmiştir.
-    ("Adapazarı", "ilce", "Sakarya", 40.7815, 30.4028, 8000),
-    ("Serdivan", "ilce", "Sakarya", 40.7627, 30.3399, 7000),
-    ("Erenler", "ilce", "Sakarya", 40.7423, 30.4212, 7000),
-    ("Arifiye", "ilce", "Sakarya", 40.6959, 30.3702, 6000),
-    ("Sapanca", "ilce", "Sakarya", 40.6900, 30.2650, 8000),
-    ("Hendek", "ilce", "Sakarya", 40.7986, 30.7444, 7000),
-    ("Akyazı", "ilce", "Sakarya", 40.6845, 30.6221, 7000),
-    ("Geyve", "ilce", "Sakarya", 40.5119, 30.2882, 7000),
-    ("Pamukova", "ilce", "Sakarya", 40.5000, 30.1500, 6000),
-    ("Karasu", "ilce", "Sakarya", 41.1077, 30.6884, 8000),
-    ("Kocaali", "ilce", "Sakarya", 41.0450, 30.8547, 6000),
-    ("Ferizli", "ilce", "Sakarya", 40.9247, 30.5364, 5000),
-    ("Kaynarca", "ilce", "Sakarya", 41.0450, 30.3050, 6000),
-    ("Söğütlü", "ilce", "Sakarya", 40.8747, 30.4972, 5000),
-    ("Karapürçek", "ilce", "Sakarya", 40.6333, 30.4833, 5000),
-    ("Taraklı", "ilce", "Sakarya", 40.3833, 30.4833, 6000),
-]
+MIN_IL_RADIUS_M = 8000
+MAX_IL_RADIUS_M = 25000
+MIN_ILCE_RADIUS_M = 4000
+MAX_ILCE_RADIUS_M = 12000
+
+
+def _radius_from_area(area_km2: float | None, min_r: int, max_r: int) -> int:
+    """Bölgenin gerçek yüzölçümünden (varsa) makul bir arama yarıçapı türetir —
+    sabit/uydurma bir değer yerine gerçek veriye dayalı, ama Overpass/Google sorgu
+    maliyetini kontrol altında tutmak için sınırlanmış bir yarıçap."""
+    if not area_km2:
+        return min_r
+    radius_m = math.sqrt(area_km2 / math.pi) * 1000
+    return int(max(min_r, min(max_r, radius_m)))
+
+
+def _load_turkey_locations() -> dict:
+    path = Path(__file__).parent / "data" / "turkey_locations.json"
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _seed_regions(db) -> None:
+    data = _load_turkey_locations()
+    province_region_id_by_external_id: dict[int, int] = {}
+
+    for p in data["provinces"]:
+        radius = _radius_from_area(p.get("area_km2"), MIN_IL_RADIUS_M, MAX_IL_RADIUS_M)
+        region = db.query(Region).filter_by(name=p["name"], level="il").one_or_none()
+        if region is None:
+            region = Region(name=p["name"], level="il", center_lat=p["lat"], center_lng=p["lng"], search_radius_m=radius)
+            db.add(region)
+            db.flush()
+        else:
+            region.center_lat = p["lat"]
+            region.center_lng = p["lng"]
+            region.search_radius_m = radius
+        province_region_id_by_external_id[p["id"]] = region.id
+
+    for d in data["districts"]:
+        parent_id = province_region_id_by_external_id[d["provinceId"]]
+        radius = _radius_from_area(d.get("area_km2"), MIN_ILCE_RADIUS_M, MAX_ILCE_RADIUS_M)
+        # Doğal anahtar (name, parent_region_id) — Türkiye'de bazı ilçe isimleri
+        # farklı illerde tekrar edebildiği için (ör. Yenişehir) sadece isme göre
+        # arama yanlış eşleşmeye/çakışmaya yol açar.
+        region = (
+            db.query(Region)
+            .filter_by(name=d["name"], level="ilce", parent_region_id=parent_id)
+            .one_or_none()
+        )
+        if region is None:
+            db.add(
+                Region(
+                    name=d["name"],
+                    level="ilce",
+                    parent_region_id=parent_id,
+                    center_lat=d["lat"],
+                    center_lng=d["lng"],
+                    search_radius_m=radius,
+                )
+            )
+        else:
+            region.center_lat = d["lat"]
+            region.center_lng = d["lng"]
+            region.search_radius_m = radius
+    db.flush()
 
 # name, osm_tags ("key=value" — OverpassProvider bunu doğrudan sorguya çevirir), keyword_variants
 # Not: OSM etiket kapsamı sektöre ve bölgeye göre değişir; bu yüzden her sektöre isim bazlı
@@ -209,7 +257,12 @@ INTEGRATIONS = [
     dict(
         name="google_places",
         terms_url="https://cloud.google.com/maps-platform/terms",
-        quota_config={"daily_request_cap": 1000, "unit": "requests/day", "configurable": True},
+        quota_config={
+            "daily_request_cap": 200,
+            "unit": "requests/day",
+            "configurable": True,
+            "note": "Text Search (New) çoğu istenen alan (rating, telefon, website, saat) Enterprise SKU'ya girer — kota düşük tutulmalı, sadece kullanıcı 'Analiz Et'/discovery tetiklediğinde çağrılır.",
+        },
         cache_policy={
             "note": "Google Places ToS'a göre alan bazlı cache süresi değişebilir; sabit varsayım yapılmaz.",
             "default_ttl_days": None,
@@ -243,24 +296,7 @@ INTEGRATIONS = [
 def run():
     db = SessionLocal()
     try:
-        region_ids_by_name: dict[str, int] = {}
-        for name, level, parent_name, lat, lng, radius in REGIONS:
-            region = db.query(Region).filter_by(name=name).one_or_none()
-            if region is None:
-                region = Region(name=name, level=level, center_lat=lat, center_lng=lng, search_radius_m=radius)
-                db.add(region)
-                db.flush()
-            else:
-                region.level = level
-                region.center_lat = lat
-                region.center_lng = lng
-                region.search_radius_m = radius
-            region_ids_by_name[name] = region.id
-
-        for name, level, parent_name, *_ in REGIONS:
-            if parent_name:
-                region = db.query(Region).filter_by(name=name).one()
-                region.parent_region_id = region_ids_by_name[parent_name]
+        _seed_regions(db)
 
         for name, osm_tags, keywords in SECTORS:
             sector = db.query(Sector).filter_by(name=name).one_or_none()
@@ -301,9 +337,10 @@ def run():
             db.execute(stmt)
 
         db.commit()
+        region_count = db.query(Region).count()
         print(
-            f"Seed OK: {len(REGIONS)} region, {len(SECTORS)} sector, {len(SERVICES)} service, "
-            f"{len(INTEGRATIONS)} integration_registry kaydı."
+            f"Seed OK: {region_count} region (81 il + ilçeler), {len(SECTORS)} sector, "
+            f"{len(SERVICES)} service, {len(INTEGRATIONS)} integration_registry kaydı."
         )
     except IntegrityError:
         db.rollback()

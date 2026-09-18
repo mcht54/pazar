@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type HealthStatus } from "@/lib/api";
 import type { Business, DiscoveryJob, Region, Sector } from "@/lib/types";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -26,10 +26,12 @@ export default function HomePage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthStatus | null>(null);
 
   useEffect(() => {
     api.getRegions().then(setRegions).catch((e) => setError(e.message));
     api.getSectors().then(setSectors).catch((e) => setError(e.message));
+    api.getHealth().then(setHealth).catch(() => {});
   }, []);
 
   const provinces = regions.filter((r) => r.level === "il");
@@ -41,12 +43,14 @@ export default function HomePage() {
     const interval = setInterval(async () => {
       const updated = await api.getDiscoveryJob(job.id);
       setJob(updated);
+      // Sonuçlar arka planda parça parça (sayfa/genişletme denemesi bazında) DB'ye yazılıyor —
+      // iş bitmeden de mevcut olanları göster (progressive/streaming sonuç).
+      const results = await api.getBusinesses({ region_id: updated.region_id, sector_id: updated.sector_id });
+      setBusinesses(results);
       if (updated.status !== "pending" && updated.status !== "running") {
         clearInterval(interval);
-        const results = await api.getBusinesses({ region_id: updated.region_id, sector_id: updated.sector_id });
-        setBusinesses(results);
       }
-    }, 1200);
+    }, 1000);
     return () => clearInterval(interval);
   }, [job]);
 
@@ -103,6 +107,17 @@ export default function HomePage() {
     <main className="container">
       <h1>Mchttasarım Marketing OS</h1>
       <p className="muted">Şehir, ilçe ve sektör seçip gerçek potansiyel müşterileri keşfedin.</p>
+
+      {health && (
+        <p className={health.discovery_provider === "mock" ? "demo-badge" : "data-source-badge"}>
+          {health.discovery_provider === "google" && "Veri kaynağı: Google Places API (New)"}
+          {health.discovery_provider === "osm" && "Veri kaynağı: OpenStreetMap — © OpenStreetMap contributors (ODbL)"}
+          {health.discovery_provider === "mock" && "DİKKAT: DEMO/MOCK mod aktif — gerçek veri gösterilmiyor (sadece test için)"}
+          {!health.google_places_configured && health.discovery_provider === "osm" && (
+            <span className="muted"> · Google Places anahtarı eklenirse (.env) daha hızlı/kapsamlı arama için otomatik kullanılabilir.</span>
+          )}
+        </p>
+      )}
 
       <div className="card">
         <div className="form-row">

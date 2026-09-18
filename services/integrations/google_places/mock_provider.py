@@ -47,7 +47,7 @@ class MockPlacesProvider(PlacesProvider):
     name = "mock_demo"
     is_demo_data = True
 
-    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
+    def search(self, *, region: Region, sector: Sector, target_count: int, on_batch=None) -> SearchOutcome:
         region_name, sector_name = region.name, sector.name
         items: list[PlaceResult] = []
         sector_word = _sector_word(sector_name)
@@ -102,4 +102,6 @@ class MockPlacesProvider(PlacesProvider):
                 )
             )
 
+        if on_batch:
+            on_batch(items)
         return SearchOutcome(provider_name=self.name, is_demo_data=True, items=items)

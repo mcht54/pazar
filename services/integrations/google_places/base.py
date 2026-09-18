@@ -12,8 +12,11 @@ etiket gibi ek bilgiye ihtiyacı var; mock provider bunları basitçe yok sayar.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Callable
 
 from packages.db.models import Region, Sector
+
+OnBatch = Callable[[list["PlaceResult"]], None]
 
 
 @dataclass
@@ -49,10 +52,15 @@ class PlacesProvider(ABC):
     is_demo_data: bool = False
 
     @abstractmethod
-    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
+    def search(self, *, region: Region, sector: Sector, target_count: int, on_batch: OnBatch | None = None) -> SearchOutcome:
         """Belirtilen bölge/sektör için en az target_count başarılı sonuç toplamaya çalışır.
 
         Başarısız tekil kayıtlar (success=False) da listeye dahil edilir — çağıran taraf
         (Celery task) bunları item_errors'a işler, tüm job'u başarısız saymaz.
+
+        on_batch verilirse, sağlayıcı her yeni veri grubunu (ör. Google'da her sayfa,
+        Overpass'ta her genişletme denemesi) elde eder etmez bu callback ile bildirir —
+        böylece çağıran taraf sonuçları DB'ye hemen yazıp kullanıcıya arama bitmeden
+        gösterebilir (progressive/streaming sonuç).
         """
         raise NotImplementedError

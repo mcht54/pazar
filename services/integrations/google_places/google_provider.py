@@ -1,12 +1,18 @@
-"""Gerçek Google Places API (New) sağlayıcısı.
+"""Gerçek Google Places API (New) sağlayıcısı — Text Search (New).
 
-Sadece DISCOVERY_PROVIDER=google iken kullanılır. GOOGLE_PLACES_API_KEY .env'den
-okunur, koda asla gömülmez. Kota/cache/attribution kuralları integrations_registry
-tablosundan okunur (bkz. policy.py) — sabit varsayım yapılmaz.
+Sadece DISCOVERY_PROVIDER=google iken (ve GOOGLE_PLACES_API_KEY .env'de tanımlıyken)
+kullanılır. Anahtar koda asla gömülmez, sadece backend tarafında okunur. Kota/cache/
+attribution kuralları integrations_registry tablosundan okunur (bkz. policy.py).
 
-Not (Sprint 1): Nearby Search + Text Search + Place Details çağrılarının tam
-implementasyonu, gerçek bir API anahtarıyla doğrulanana kadar tamamlanmayacak.
-Bu dosya; timeout, retry, rate limit ve quota tracking iskeletini sağlar.
+Neden Text Search (New): Nearby Search kategori bazlı sabit "type" listesine bağımlı
+ve bizim 55 sektörümüzün çoğu (ör. "Web Tasarım", "Muhasebe") Google'ın resmi place
+type listesinde yok. Text Search serbest metin sorgusu + locationBias ile hem tag
+hem isim bazlı eşleşmeyi tek istekte kapsıyor ve New API'de asıl önerilen yöntem bu.
+
+Maliyet notu: FieldMask'te istediğimiz alanların çoğu (rating, review sayısı, telefon,
+website, açılış saatleri) Google'ın "Enterprise" SKU'suna giriyor — bu yüzden FieldMask
+kesinlikle gerekenle sınırlı tutulur, gereksiz alan istenmez (madde: "FieldMask kullanarak
+sadece gerçekten gerekli alanları iste").
 """
 
 import time
@@ -17,12 +23,33 @@ from sqlalchemy.orm import Session
 
 from packages.config import settings
 from packages.db.models import ApiUsageLedger, Region, Sector
-from services.integrations.google_places.base import PlacesProvider, SearchOutcome
+from services.integrations.google_places.base import PlaceResult, PlacesProvider, SearchOutcome
 from services.integrations.google_places.policy import load_policy
 
-REQUEST_TIMEOUT_SECONDS = 8.0
+SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+REQUEST_TIMEOUT_SECONDS = 10.0
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE_SECONDS = 1.5
+PAGE_SIZE = 20  # Google'ın izin verdiği maksimum
+MAX_PAGES = 3  # Text Search (New) toplamda en fazla ~60 sonuç (3 sayfa) verir
+PAGE_TOKEN_DELAY_SECONDS = 2.0  # bir sonraki sayfa token'ı aktif olana kadar kısa bekleme
+
+FIELD_MASK = ",".join(
+    [
+        "places.id",
+        "places.displayName",
+        "places.formattedAddress",
+        "places.location",
+        "places.nationalPhoneNumber",
+        "places.websiteUri",
+        "places.rating",
+        "places.userRatingCount",
+        "places.regularOpeningHours.weekdayDescriptions",
+        "places.businessStatus",
+        "places.types",
+        "nextPageToken",
+    ]
+)
 
 
 class GooglePlacesQuotaExceeded(RuntimeError):
@@ -64,38 +91,106 @@ class GooglePlacesProvider(PlacesProvider):
         )
         self.db.commit()
 
-    def _request_with_retry(self, client: httpx.Client, method: str, url: str, **kwargs) -> httpx.Response:
+    def _post_with_retry(self, body: dict) -> dict:
         last_exc: Exception | None = None
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": settings.google_places_api_key,
+            "X-Goog-FieldMask": FIELD_MASK,
+        }
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                response = client.request(method, url, timeout=REQUEST_TIMEOUT_SECONDS, **kwargs)
-                if response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        f"Google Places {response.status_code}", request=response.request, response=response
-                    )
-                return response
-            except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.ConnectError) as exc:
+                response = httpx.post(SEARCH_URL, json=body, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+                if response.status_code == 200:
+                    self._log_usage("places:searchText")
+                    return response.json()
+                if response.status_code == 429 or response.status_code >= 500:
+                    last_exc = RuntimeError(f"Google Places {response.status_code}: {response.text[:300]}")
+                else:
+                    # 400/401/403 gibi kalıcı hatalar (geçersiz anahtar, kota, hatalı istek) — tekrar denemenin anlamı yok
+                    raise RuntimeError(f"Google Places API hatası {response.status_code}: {response.text[:300]}")
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as exc:
                 last_exc = exc
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
         raise RuntimeError(f"Google Places isteği {MAX_RETRIES} denemeden sonra başarısız: {last_exc}")
 
-    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
+    def _parse_place(self, place: dict) -> PlaceResult:
+        location = place.get("location") or {}
+        opening_hours = None
+        weekday_desc = (place.get("regularOpeningHours") or {}).get("weekdayDescriptions")
+        if weekday_desc:
+            opening_hours = "; ".join(weekday_desc)
+
+        return PlaceResult(
+            external_ref=f"google_{place['id']}",
+            success=True,
+            name=(place.get("displayName") or {}).get("text"),
+            address=place.get("formattedAddress"),
+            lat=location.get("latitude"),
+            lng=location.get("longitude"),
+            phone=place.get("nationalPhoneNumber"),
+            website=place.get("websiteUri"),
+            rating=place.get("rating"),
+            review_count=place.get("userRatingCount"),
+            photo_count=None,  # photos alanı ayrı/pahalı bir SKU — FieldMask'e dahil edilmedi
+            opening_hours=opening_hours,
+            categories=place.get("types", []),
+        )
+
+    def search(self, *, region: Region, sector: Sector, target_count: int, on_batch=None) -> SearchOutcome:
         if not settings.google_places_api_key:
             raise RuntimeError(
                 "GOOGLE_PLACES_API_KEY tanımlı değil. DISCOVERY_PROVIDER=google kullanmak için "
-                ".env dosyasına gerçek bir anahtar eklenmeli. Anahtar yoksa DISCOVERY_PROVIDER=mock kullanın."
+                ".env dosyasına gerçek bir anahtar eklenmeli. Anahtar yoksa DISCOVERY_PROVIDER=osm kullanın."
             )
 
         self._check_quota()
 
-        # TODO (gerçek API anahtarı elde edilince tamamlanacak):
-        #   1. Nearby/Text Search çağrısı (region merkezi + yarıçap, sector -> place type/keyword)
-        #   2. Sayfalama (next_page_token)
-        #   3. Her aday için Place Details çağrısı (phone, website, rating, review_count, photos)
-        #   4. Her başarılı/başarısız çağrı self._log_usage(...) ile api_usage_ledger'a işlenir
-        #   5. Place Details sonuçları policy.cache_policy'e göre Redis'te önbelleklenir
-        raise NotImplementedError(
-            "GooglePlacesProvider henüz tamamlanmadı — gerçek GOOGLE_PLACES_API_KEY ile birlikte "
-            "Sprint kapsamında implemente edilecek. Şimdilik DISCOVERY_PROVIDER=mock kullanın."
-        )
+        text_query = f"{sector.name} {region.name}"
+        items: list[PlaceResult] = []
+        seen_refs: set[str] = set()
+        page_token: str | None = None
+
+        for page in range(MAX_PAGES):
+            if len(items) >= target_count:
+                break
+
+            body = {
+                "textQuery": text_query,
+                "languageCode": "tr",
+                "pageSize": PAGE_SIZE,
+                "locationBias": {
+                    "circle": {
+                        "center": {"latitude": region.center_lat, "longitude": region.center_lng},
+                        "radius": float(region.search_radius_m),
+                    }
+                },
+            }
+            if page_token:
+                body["pageToken"] = page_token
+
+            data = self._post_with_retry(body)
+            places = data.get("places", [])
+
+            batch: list[PlaceResult] = []
+            for place in places:
+                ref = f"google_{place['id']}"
+                if ref in seen_refs:
+                    continue
+                seen_refs.add(ref)
+                parsed = self._parse_place(place)
+                items.append(parsed)
+                batch.append(parsed)
+                if len(items) >= target_count:
+                    break
+
+            if on_batch and batch:
+                on_batch(batch)
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+            time.sleep(PAGE_TOKEN_DELAY_SECONDS)
+
+        return SearchOutcome(provider_name=self.name, is_demo_data=False, items=items)

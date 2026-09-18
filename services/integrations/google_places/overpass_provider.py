@@ -37,6 +37,8 @@ REQUEST_TIMEOUT_SECONDS = 50.0
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE_SECONDS = 3.0
 MIN_INTERVAL_BETWEEN_REQUESTS_SECONDS = 2.0
+WIDE_SEARCH_MULTIPLIER = 2.5
+WIDE_SEARCH_MAX_RADIUS_M = 20000
 USER_AGENT = "MchttasarimMarketingOS/0.1 (local use; +https://mchttasarim.com)"
 
 _last_request_at: float = 0.0
@@ -134,20 +136,7 @@ class OverpassProvider(PlacesProvider):
             f"OpenStreetMap Overpass API'ye {MAX_RETRIES} denemeden sonra ulaşılamadı: {last_exc}"
         )
 
-    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
-        query = _build_query(
-            lat=region.center_lat,
-            lng=region.center_lng,
-            radius_m=region.search_radius_m,
-            osm_tags=sector.google_place_types or [],
-            keywords=sector.keyword_variants or [],
-        )
-
-        data = self._request(query)
-        elements = data.get("elements", [])
-
-        seen_refs: set[str] = set()
-        items: list[PlaceResult] = []
+    def _parse_elements(self, elements: list[dict], seen_refs: set[str], items: list[PlaceResult], target_count: int) -> None:
         for el in elements:
             tags = el.get("tags") or {}
             name = tags.get("name")
@@ -180,6 +169,33 @@ class OverpassProvider(PlacesProvider):
                 )
             )
             if len(items) >= target_count:
-                break
+                return
+
+    def search(self, *, region: Region, sector: Sector, target_count: int, on_batch=None) -> SearchOutcome:
+        osm_tags = sector.google_place_types or []
+        keywords = sector.keyword_variants or []
+
+        seen_refs: set[str] = set()
+        items: list[PlaceResult] = []
+
+        query = _build_query(region.center_lat, region.center_lng, region.search_radius_m, osm_tags, keywords)
+        data = self._request(query)
+        before = len(items)
+        self._parse_elements(data.get("elements", []), seen_refs, items, target_count)
+        if on_batch and len(items) > before:
+            on_batch(items[before:])
+
+        # Sonuç istenenden az geldiyse ve yarıçap büyütmeye uygunsa TEK bir ek deneme ile
+        # arama alanını genişlet (ör. küçük bir ilçede gerçekten az işletme tagli olabilir).
+        # Bu, "10 istedim 1 geldi" durumunda kodun elinden geleni yapmasını sağlar; OSM'de
+        # o kategori için gerçekten veri yoksa yine de az sonuçla dönmek dürüst olan davranıştır.
+        if len(items) < target_count and region.search_radius_m < WIDE_SEARCH_MAX_RADIUS_M:
+            wider_radius = min(region.search_radius_m * WIDE_SEARCH_MULTIPLIER, WIDE_SEARCH_MAX_RADIUS_M)
+            wider_query = _build_query(region.center_lat, region.center_lng, int(wider_radius), osm_tags, keywords)
+            wider_data = self._request(wider_query)
+            before = len(items)
+            self._parse_elements(wider_data.get("elements", []), seen_refs, items, target_count)
+            if on_batch and len(items) > before:
+                on_batch(items[before:])
 
         return SearchOutcome(provider_name=self.name, is_demo_data=False, items=items)

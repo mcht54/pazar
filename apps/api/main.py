@@ -36,7 +36,13 @@ app.include_router(analysis.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "env": settings.env, "discovery_provider": settings.discovery_provider}
+    return {
+        "status": "ok",
+        "env": settings.env,
+        "discovery_provider": settings.discovery_provider,
+        "google_places_configured": bool(settings.google_places_api_key),
+        "is_real_data_source": settings.discovery_provider in ("osm", "google"),
+    }
 
 
 @app.get("/api/health/db")

@@ -87,6 +87,38 @@ def test_overpass_provider_parses_real_looking_response(seeded_db, monkeypatch):
     assert restoran_a.review_count is None
 
 
+def test_overpass_provider_widens_search_when_results_are_few(seeded_db, monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(url, data, headers, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _FakeResponse()  # 2 gerçek sonuç (yasaklı/tekrar hariç)
+        # ikinci (geniş) sorguda ek bir işletme daha bulunur
+        class _Wider:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "elements": [
+                        {"type": "node", "id": 999, "lat": 40.8, "lon": 30.4, "tags": {"amenity": "restaurant", "name": "Uzak Restoran"}}
+                    ]
+                }
+
+        return _Wider()
+
+    monkeypatch.setattr(op_module.httpx, "post", fake_post)
+    monkeypatch.setattr(op_module, "_throttle", lambda: None)
+
+    region = seeded_db.query(Region).filter_by(name="Serdivan").one()
+    sector = seeded_db.query(Sector).filter_by(name="Restoran").one()
+
+    outcome = OverpassProvider().search(region=region, sector=sector, target_count=3)
+    assert calls["n"] == 2, "sonuç yetersizken ikinci (geniş) sorgu tetiklenmeli"
+    names = [i.name for i in outcome.items]
+    assert "Uzak Restoran" in names
+
+
 def test_overpass_provider_caps_at_target_count(seeded_db, monkeypatch):
     monkeypatch.setattr(op_module.httpx, "post", lambda *a, **k: _FakeResponse())
     monkeypatch.setattr(op_module, "_throttle", lambda: None)

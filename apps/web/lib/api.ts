@@ -22,7 +22,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface HealthStatus {
+  status: string;
+  env: string;
+  discovery_provider: "osm" | "google" | "mock" | string;
+  google_places_configured: boolean;
+  is_real_data_source: boolean;
+}
+
 export const api = {
+  getHealth: () => request<HealthStatus>("/api/health"),
   getRegions: () => request<Region[]>("/api/regions"),
   getSectors: () => request<Sector[]>("/api/sectors"),
 
