@@ -61,6 +61,7 @@ class Business(Base):
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # --- Discovery Data (Google Places, kamuya açık) ---
     # Tekil dedup anahtarı — sağlayıcıya göre "osm_node_123..." veya gerçek Google place_id olabilir.

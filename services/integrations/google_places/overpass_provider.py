@@ -160,7 +160,8 @@ class OverpassProvider(PlacesProvider):
                     lat=lat,
                     lng=lng,
                     phone=tags.get("phone") or tags.get("contact:phone"),
-                    website=tags.get("website") or tags.get("contact:website"),
+                    website=tags.get("website") or tags.get("contact:website") or tags.get("url"),
+                    email=tags.get("email") or tags.get("contact:email"),
                     rating=None,  # OSM'de rating verisi yok — asla tahmin edilmez
                     review_count=None,  # OSM'de review_count verisi yok — asla tahmin edilmez
                     photo_count=None,

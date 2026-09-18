@@ -47,6 +47,7 @@ class BusinessOut(BaseModel):
     address: str | None
     phone: str | None
     website: str | None
+    email: str | None
     google_rating: float | None
     google_review_count: int | None
     photo_count: int | None

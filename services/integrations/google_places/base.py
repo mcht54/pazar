@@ -33,6 +33,7 @@ class PlaceResult:
     lng: float | None = None
     phone: str | None = None
     website: str | None = None
+    email: str | None = None
     rating: float | None = None
     review_count: int | None = None
     photo_count: int | None = None

@@ -49,6 +49,8 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
             existing.website = item.website
         if item.phone:
             existing.phone = item.phone
+        if item.email:
+            existing.email = item.email
         if item.opening_hours:
             existing.opening_hours = item.opening_hours
         db.flush()
@@ -63,6 +65,7 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
         lng=item.lng,
         phone=item.phone,
         website=item.website,
+        email=item.email,
         google_place_id=item.external_ref,
         google_rating=item.rating,
         google_review_count=item.review_count,
@@ -79,6 +82,7 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
     _record_metric(db, business, "photo_count", item.photo_count, source)
     _record_metric(db, business, "website_present", bool(item.website), source)
     _record_metric(db, business, "phone_present", bool(item.phone), source)
+    _record_metric(db, business, "email_present", bool(item.email), source)
 
     return business, True
 
