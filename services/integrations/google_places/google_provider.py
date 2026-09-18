@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from packages.config import settings
-from packages.db.models import ApiUsageLedger
+from packages.db.models import ApiUsageLedger, Region, Sector
 from services.integrations.google_places.base import PlacesProvider, SearchOutcome
 from services.integrations.google_places.policy import load_policy
 
@@ -80,7 +80,7 @@ class GooglePlacesProvider(PlacesProvider):
                     time.sleep(RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
         raise RuntimeError(f"Google Places isteği {MAX_RETRIES} denemeden sonra başarısız: {last_exc}")
 
-    def search(self, *, region_name: str, sector_name: str, target_count: int) -> SearchOutcome:
+    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
         if not settings.google_places_api_key:
             raise RuntimeError(
                 "GOOGLE_PLACES_API_KEY tanımlı değil. DISCOVERY_PROVIDER=google kullanmak için "

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     google_pagespeed_api_key: str = ""
 
-    discovery_provider: str = "mock"  # mock | google
+    discovery_provider: str = "osm"  # osm (gerçek veri, varsayılan) | mock (sadece test) | google
     ai_provider: str = "none"  # none | claude — ANTHROPIC_API_KEY yoksa "none" kalmalı
 
     @property

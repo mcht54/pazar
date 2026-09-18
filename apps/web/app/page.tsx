@@ -102,12 +102,12 @@ export default function HomePage() {
   return (
     <main className="container">
       <h1>Mchttasarım Marketing OS</h1>
-      <p className="muted">Bölge ve sektör seçip potansiyel müşterileri keşfedin.</p>
+      <p className="muted">Şehir, ilçe ve sektör seçip gerçek potansiyel müşterileri keşfedin.</p>
 
       <div className="card">
         <div className="form-row">
           <div className="form-field">
-            <label>Bölge (İl)</label>
+            <label>Şehir</label>
             <select
               value={provinceId ?? ""}
               onChange={(e) => {
@@ -188,7 +188,10 @@ export default function HomePage() {
           {bulkMessage && <p className="muted">{bulkMessage}</p>}
 
           {businesses.some((b) => b.is_demo_data) && (
-            <p className="demo-badge">DEMO DATA — Gerçek Google verisi değildir</p>
+            <p className="demo-badge">DEMO DATA — Gerçek veri değildir (test amaçlı mock sonuçlar)</p>
+          )}
+          {businesses.some((b) => !b.is_demo_data) && (
+            <p className="muted">Veri kaynağı: OpenStreetMap — © OpenStreetMap contributors (ODbL)</p>
           )}
 
           <table>
@@ -196,29 +199,39 @@ export default function HomePage() {
               <tr>
                 <th></th>
                 <th>İşletme</th>
+                <th>Kategori</th>
                 <th>Adres</th>
                 <th>Telefon</th>
                 <th>Website</th>
+                <th>Google&apos;da Aç</th>
                 <th>Rating</th>
                 <th>Yorum</th>
-                <th>Kaynak</th>
+                <th>Çalışma Saatleri</th>
                 <th>Analiz</th>
               </tr>
             </thead>
             <tbody>
-              {businesses.map((b) => (
-                <tr key={b.id}>
-                  <td><input type="checkbox" checked={selectedIds.has(b.id)} onChange={() => toggleSelected(b.id)} /></td>
-                  <td><Link href={`/businesses/${b.id}`}>{b.name}</Link></td>
-                  <td>{b.address ?? "-"}</td>
-                  <td>{b.phone ?? "-"}</td>
-                  <td>{b.website ?? "-"}</td>
-                  <td>{b.google_rating ?? "-"}</td>
-                  <td>{b.google_review_count ?? "-"}</td>
-                  <td>{b.is_demo_data ? "DEMO" : b.discovery_source}</td>
-                  <td>{b.status}</td>
-                </tr>
-              ))}
+              {businesses.map((b) => {
+                const sectorName = sectors.find((s) => s.id === b.sector_id)?.name ?? "-";
+                const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                  `${b.name} ${b.address ?? ""}`
+                )}`;
+                return (
+                  <tr key={b.id}>
+                    <td><input type="checkbox" checked={selectedIds.has(b.id)} onChange={() => toggleSelected(b.id)} /></td>
+                    <td><Link href={`/businesses/${b.id}`}>{b.name}</Link></td>
+                    <td>{sectorName}</td>
+                    <td>{b.address ?? "-"}</td>
+                    <td>{b.phone ?? "-"}</td>
+                    <td>{b.website ?? "-"}</td>
+                    <td><a href={mapsUrl} target="_blank" rel="noreferrer">Haritada gör</a></td>
+                    <td>{b.google_rating ?? "-"}</td>
+                    <td>{b.google_review_count ?? "-"}</td>
+                    <td>{b.opening_hours ?? "-"}</td>
+                    <td>{b.status}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </>

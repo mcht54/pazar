@@ -49,6 +49,8 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
             existing.website = item.website
         if item.phone:
             existing.phone = item.phone
+        if item.opening_hours:
+            existing.opening_hours = item.opening_hours
         db.flush()
         return existing, False
 
@@ -65,6 +67,7 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
         google_rating=item.rating,
         google_review_count=item.review_count,
         photo_count=item.photo_count,
+        opening_hours=item.opening_hours,
         discovery_source=source,
         status="discovered",
     )
@@ -80,6 +83,12 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
     return business, True
 
 
+def _link_job_result(db: Session, job: DiscoveryJob, business: Business) -> None:
+    existing_link = db.query(DiscoveryJobResult).filter_by(job_id=job.id, business_id=business.id).one_or_none()
+    if existing_link is None:
+        db.add(DiscoveryJobResult(job_id=job.id, business_id=business.id))
+
+
 def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
     job = db.get(DiscoveryJob, discovery_job_id)
     if job is None:
@@ -91,12 +100,30 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
     region = db.get(Region, job.region_id)
     sector = db.get(Sector, job.sector_id)
 
+    # Performans/nezaket: aynı bölge+sektör için zaten yeterli işletme varsa dış
+    # servise tekrar istek atmadan mevcut kayıtları kullan (gereksiz API çağrısı yapma).
+    already_known = (
+        db.query(Business)
+        .filter(Business.region_id == region.id, Business.sector_id == sector.id)
+        .order_by(Business.id.asc())
+        .limit(job.target_count)
+        .all()
+    )
+    if len(already_known) >= job.target_count:
+        for business in already_known:
+            _link_job_result(db, job, business)
+        job.found_new = 0
+        job.found_existing = len(already_known)
+        job.item_errors = []
+        job.status = "completed"
+        job.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        return job
+
     provider = get_places_provider(db)
 
     try:
-        outcome: SearchOutcome = provider.search(
-            region_name=region.name, sector_name=sector.name, target_count=job.target_count
-        )
+        outcome: SearchOutcome = provider.search(region=region, sector=sector, target_count=job.target_count)
     except Exception as exc:  # provider tamamen ulaşılamaz durumda (kota, ağ, config hatası)
         job.status = "failed"
         job.error_message = str(exc)
@@ -114,11 +141,7 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
             continue
 
         business, is_new = _upsert_business(db, region, sector, item, source=outcome.provider_name)
-        existing_link = (
-            db.query(DiscoveryJobResult).filter_by(job_id=job.id, business_id=business.id).one_or_none()
-        )
-        if existing_link is None:
-            db.add(DiscoveryJobResult(job_id=job.id, business_id=business.id))
+        _link_job_result(db, job, business)
 
         if is_new:
             found_new += 1

@@ -88,7 +88,19 @@ export default function BusinessDetailPage({ params }: { params: Promise<{ id: s
       </h1>
       <p className="muted">
         {business.address} · {business.phone ?? "telefon yok"} · {business.website ?? "web sitesi yok"}
+        {business.opening_hours && <> · {business.opening_hours}</>}
+        {" · "}
+        <a
+          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${business.name} ${business.address ?? ""}`)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Google&apos;da Aç
+        </a>
       </p>
+      {!business.is_demo_data && (
+        <p className="muted">Veri kaynağı: OpenStreetMap — © OpenStreetMap contributors (ODbL)</p>
+      )}
       <p>
         Rating: {business.google_rating ?? "-"} ({business.google_review_count ?? 0} yorum) · CRM: {business.crm_stage} · Durum: {business.status}
       </p>

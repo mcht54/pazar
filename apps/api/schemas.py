@@ -50,6 +50,7 @@ class BusinessOut(BaseModel):
     google_rating: float | None
     google_review_count: int | None
     photo_count: int | None
+    opening_hours: str | None
     discovery_source: str
     is_demo_data: bool = False
     status: str

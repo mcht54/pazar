@@ -12,14 +12,16 @@ def _serdivan_restoran(db):
 
 
 def test_mock_provider_returns_results_without_network(seeded_db):
-    outcome = MockPlacesProvider().search(region_name="Serdivan", sector_name="Restoran", target_count=10)
+    region, sector = _serdivan_restoran(seeded_db)
+    outcome = MockPlacesProvider().search(region=region, sector=sector, target_count=10)
     assert outcome.is_demo_data is True
     assert len(outcome.items) == 10
 
 
 def test_mock_provider_deterministic_pagination_pattern(seeded_db):
     """target_count > tek 'sayfa' olsa bile (20 istek) tutarlı üretiyor mu."""
-    outcome = MockPlacesProvider().search(region_name="Serdivan", sector_name="Restoran", target_count=20)
+    region, sector = _serdivan_restoran(seeded_db)
+    outcome = MockPlacesProvider().search(region=region, sector=sector, target_count=20)
     assert len(outcome.items) == 20
     successes = [i for i in outcome.items if i.success]
     assert len(successes) > 10  # birden fazla "sayfa" boyunca başarı üretebiliyor
@@ -94,6 +96,37 @@ def test_discovery_job_status_lifecycle(seeded_db):
     result = run_discovery_job(seeded_db, job.id)
     assert result.status in ("completed", "partial", "failed")
     assert result.completed_at is not None
+
+
+def test_discovery_reuses_existing_businesses_without_calling_provider(seeded_db, monkeypatch):
+    """Performans/nezaket: yeterli işletme zaten DB'deyse dış servise tekrar istek atılmaz."""
+    region, sector = _serdivan_restoran(seeded_db)
+
+    job1 = DiscoveryJob(region_id=region.id, sector_id=sector.id, target_count=5)
+    seeded_db.add(job1)
+    seeded_db.commit()
+    seeded_db.refresh(job1)
+    result1 = run_discovery_job(seeded_db, job1.id)
+    assert result1.found_new == 4  # target=5 -> index4 başarısız, 4 başarılı, duplicate yok
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("Yeterli işletme zaten varken provider tekrar çağrılmamalı")
+
+    monkeypatch.setattr(
+        "services.worker.tasks.discovery.get_places_provider",
+        lambda db: type("Boom", (), {"search": _fail_if_called})(),
+    )
+
+    job2 = DiscoveryJob(region_id=region.id, sector_id=sector.id, target_count=4)
+    seeded_db.add(job2)
+    seeded_db.commit()
+    seeded_db.refresh(job2)
+    result2 = run_discovery_job(seeded_db, job2.id)
+
+    assert result2.status == "completed"
+    assert result2.found_existing == 4
+    assert result2.found_new == 0
+    assert result2.item_errors == []
 
 
 def test_discovery_persists_business_metrics(seeded_db):

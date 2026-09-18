@@ -12,6 +12,7 @@ Deterministik davranış (aynı region+sector+target_count için hep aynı sonu�
 
 import hashlib
 
+from packages.db.models import Region, Sector
 from services.integrations.google_places.base import PlaceResult, PlacesProvider, SearchOutcome
 
 NAME_TEMPLATES = [
@@ -46,7 +47,8 @@ class MockPlacesProvider(PlacesProvider):
     name = "mock_demo"
     is_demo_data = True
 
-    def search(self, *, region_name: str, sector_name: str, target_count: int) -> SearchOutcome:
+    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
+        region_name, sector_name = region.name, sector.name
         items: list[PlaceResult] = []
         sector_word = _sector_word(sector_name)
         first_success_ref: str | None = None

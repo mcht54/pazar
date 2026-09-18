@@ -63,10 +63,13 @@ class Business(Base):
     website: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # --- Discovery Data (Google Places, kamuya açık) ---
+    # Tekil dedup anahtarı — sağlayıcıya göre "osm_node_123..." veya gerçek Google place_id olabilir.
+    # İsim tarihsel (Sprint 0'da Google-only tasarlanmıştı); anlamı artık "external_ref".
     google_place_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     google_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     google_review_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     photo_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    opening_hours: Mapped[str | None] = mapped_column(String(500), nullable=True)
     discovery_source: Mapped[str] = mapped_column(String(50), nullable=False, default="google_places")
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="discovered")

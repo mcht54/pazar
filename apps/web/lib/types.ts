@@ -35,6 +35,7 @@ export interface Business {
   google_rating: number | null;
   google_review_count: number | null;
   photo_count: number | null;
+  opening_hours: string | null;
   discovery_source: string;
   is_demo_data: boolean;
   status: "discovered" | "analyzing" | "analyzed";

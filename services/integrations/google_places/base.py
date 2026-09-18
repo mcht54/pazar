@@ -1,14 +1,19 @@
 """Discovery provider arayüzü.
 
-DISCOVERY_PROVIDER=mock  -> MockPlacesProvider (internet/API anahtarı gerekmez)
-DISCOVERY_PROVIDER=google -> GooglePlacesProvider (GOOGLE_PLACES_API_KEY gerekir)
+DISCOVERY_PROVIDER=osm    -> OverpassProvider (VARSAYILAN, gerçek veri, API anahtarı gerekmez)
+DISCOVERY_PROVIDER=mock   -> MockPlacesProvider (SADECE test/geliştirme — gerçek veri değildir)
+DISCOVERY_PROVIDER=google -> GooglePlacesProvider (GOOGLE_PLACES_API_KEY gerekir, henüz tamamlanmadı)
 
 Discovery pipeline sadece bu arayüze (PlacesProvider.search) bağımlıdır; hangi
-provider kullanıldığı worker/task kodunu hiç etkilemez.
+provider kullanıldığı worker/task kodunu hiç etkilemez. search() bölge/sektörün
+kendi ORM kayıtlarını alır (isim string'i değil) — gerçek sağlayıcıların koordinat/
+etiket gibi ek bilgiye ihtiyacı var; mock provider bunları basitçe yok sayar.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
+from packages.db.models import Region, Sector
 
 
 @dataclass
@@ -28,6 +33,7 @@ class PlaceResult:
     rating: float | None = None
     review_count: int | None = None
     photo_count: int | None = None
+    opening_hours: str | None = None
     categories: list[str] = field(default_factory=list)
 
 
@@ -43,7 +49,7 @@ class PlacesProvider(ABC):
     is_demo_data: bool = False
 
     @abstractmethod
-    def search(self, *, region_name: str, sector_name: str, target_count: int) -> SearchOutcome:
+    def search(self, *, region: Region, sector: Sector, target_count: int) -> SearchOutcome:
         """Belirtilen bölge/sektör için en az target_count başarılı sonuç toplamaya çalışır.
 
         Başarısız tekil kayıtlar (success=False) da listeye dahil edilir — çağıran taraf
