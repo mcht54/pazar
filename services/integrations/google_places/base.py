@@ -1,6 +1,6 @@
 """Discovery provider arayüzü.
 
-DISCOVERY_PROVIDER=osm    -> OverpassProvider (VARSAYILAN, gerçek veri, API anahtarı gerekmez)
+DISCOVERY_PROVIDER=google_maps -> GoogleMapsProvider (VARSAYILAN, gerçek Google Haritalar verisi, API anahtarı gerekmez)
 DISCOVERY_PROVIDER=mock   -> MockPlacesProvider (SADECE test/geliştirme — gerçek veri değildir)
 DISCOVERY_PROVIDER=google -> GooglePlacesProvider (GOOGLE_PLACES_API_KEY gerekir, henüz tamamlanmadı)
 
@@ -12,6 +12,7 @@ etiket gibi ek bilgiye ihtiyacı var; mock provider bunları basitçe yok sayar.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Callable
 
 from packages.db.models import Region, Sector
@@ -37,8 +38,17 @@ class PlaceResult:
     rating: float | None = None
     review_count: int | None = None
     photo_count: int | None = None
-    opening_hours: str | None = None
-    categories: list[str] = field(default_factory=list)
+    opening_hours: str | None = None  # kullanıcıya gösterilecek (Türkçe) biçim
+    categories: list[str] = field(default_factory=list)  # ham kaynak kategorileri (doğrulama/izlenebilirlik için)
+
+    # --- Kaynaktan gelen ek profil verisi. Kaynak vermediyse None kalır — asla tahmin edilmez. ---
+    category_label: str | None = None  # kaynaktaki kategorinin Türkçe etiketi
+    maps_url: str | None = None  # SADECE kaynak gerçek bir Google Haritalar bağlantısı verdiyse
+    source_url: str | None = None  # verinin alındığı kaynak kaydı (ör. OSM node sayfası)
+    last_review_at: datetime | None = None
+    photos_capped: bool = False  # True ise photo_count "en az bu kadar" demektir (API üst sınırı)
+    reviews_sampled: int | None = None  # son yorum tarihi kaç yorum arasından bulundu
+    profile: dict = field(default_factory=dict)  # sosyal medya, birincil tür vb. ek alanlar
 
 
 @dataclass
@@ -60,7 +70,7 @@ class PlacesProvider(ABC):
         (Celery task) bunları item_errors'a işler, tüm job'u başarısız saymaz.
 
         on_batch verilirse, sağlayıcı her yeni veri grubunu (ör. Google'da her sayfa,
-        Overpass'ta her genişletme denemesi) elde eder etmez bu callback ile bildirir —
+        Google Haritalar'da her kaydırma/sorgu grubu) elde eder etmez bu callback ile bildirir —
         böylece çağıran taraf sonuçları DB'ye hemen yazıp kullanıcıya arama bitmeden
         gösterebilir (progressive/streaming sonuç).
         """

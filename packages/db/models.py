@@ -9,6 +9,7 @@ from datetime import datetime, date
 
 from sqlalchemy import (
     ForeignKey,
+    Numeric,
     String,
     Text,
     Integer,
@@ -44,6 +45,9 @@ class Sector(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    group_name: Mapped[str | None] = mapped_column(String(80), nullable=True)  # arayüzde gruplu liste için
+    # Pasif sektörler seçim listesinde görünmez; eski kayıtlar bozulmasın diye silinmek yerine pasife alınır.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     google_place_types: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     keyword_variants: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
 
@@ -73,10 +77,33 @@ class Business(Base):
     opening_hours: Mapped[str | None] = mapped_column(String(500), nullable=True)
     discovery_source: Mapped[str] = mapped_column(String(50), nullable=False, default="google_places")
 
+    # Kaynaktan gelen (doğrulanmış) ek profil verisi. Kaynakta olmayan alan buraya YAZILMAZ.
+    category_label: Mapped[str | None] = mapped_column(String(120), nullable=True)  # kaynaktaki kategori (Türkçe etiket)
+    maps_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # sadece kaynak gerçek bir Maps bağlantısı verdiyse
+    last_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # {"categories": [...], "primary_type": "...", "social": {...}, "photos_capped": bool, ...}
+
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="discovered")
     # discovered | analyzing | analyzed
 
-    crm_stage: Mapped[str] = mapped_column(String(40), nullable=False, default="Yeni")
+    crm_stage: Mapped[str] = mapped_column(String(40), nullable=False, default="Yeni")  # bkz. packages/crm.py
+    crm_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # son CRM işlemi (durum/not)
+    crm_added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # dolu = CRM'de; analiz bunu ASLA doldurmaz
+    staff_note: Mapped[str | None] = mapped_column(Text, nullable=True)  # personelin serbest notu (dışa aktarmada "Personel notu")
+    crm_added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # CRM'e ilk ekleyen kullanıcı
+    crm_updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # son CRM işlemini yapan kullanıcı
+    crm_last_action: Mapped[str | None] = mapped_column(String(300), nullable=True)  # ör. "Arandı → Teklif Gönderildi"
+    # --- satış takibi (CRM): sorumlu personel, takip, teklif/satış tutarı, kayıp nedeni, ilgilenilen hizmet
+    crm_owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # sorumlu personel
+    next_follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    follow_up_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # son görüşme/arama
+    interested_service: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    offer_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # verilen/hazırlanan teklif tutarı (TL)
+    sale_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # kazanılan satış tutarı (TL)
+    lost_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     opportunity_score_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sales_priority: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Yüksek | Orta | Düşük
 
@@ -105,6 +132,7 @@ class DiscoveryJob(Base):
     item_errors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # [{"external_ref": "...", "reason": "..."}] — provider tarafında tekil kayıt hataları (partial failure)
     requested_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # aramayı başlatan kullanıcı
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -131,6 +159,10 @@ class AnalysisJob(Base):
     #  "rule_engine": "success", "scoring": "success", "competitor": "success", "ai_interpretation": "skipped"}
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ANALİZ GEÇMİŞİ: her satır bir analiz işlemidir (business_id + user_id + completed_at + status). Aynı firma tekrar analiz edilirse yeni satır açılır.
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # analizi başlatan kullanıcı (eski kayıtlarda boş)
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # user = personel isteği (arama/analiz düğmesi) · maintenance = bakım (önbellekten yeniden hesaplama; personel sayaçlarına dahil edilmez)
 
 
 class BusinessMetric(Base):
@@ -171,6 +203,46 @@ class Finding(Base):
     mchttasarim_opportunity: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommended_service_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False, default=list)
     raw_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class BusinessResearch(Base):
+    """Bir işletmenin çok kaynaklı araştırma sonucu: kaynak durumları, Google/Bing profilleri, web sitesi adayları,
+    sosyal medya, alan bazlı çapraz doğrulama kararları. Ayrıntılar `payload` içindedir (bkz. services/research/pipeline.py)."""
+
+    __tablename__ = "business_research"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class SalesAssessment(Base):
+    """Bir analiz koşusunun satış değerlendirmesi: seviye + gerekçe + önerilen hizmetler + görüşme notu.
+
+    Tamamen kural tabanlıdır (AI yok). `payload` ekranda gösterilen web sitesi ve Google profili
+    kontrol listelerini (her kontrol: durum, değer, neden önemli, satılabilecek hizmet) taşır.
+    """
+
+    __tablename__ = "sales_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
+    analysis_job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id"), nullable=True)
+
+    level: Mapped[str] = mapped_column(String(20), nullable=False)  # Yüksek | Orta | Düşük | Belirsiz
+    level_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    rank_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)  # sadece sıralama için, ekranda gösterilmez
+    needs_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    primary_service_id: Mapped[int | None] = mapped_column(ForeignKey("services_catalog.id"), nullable=True)
+    secondary_service_id: Mapped[int | None] = mapped_column(ForeignKey("services_catalog.id"), nullable=True)
+    top_opportunity: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_call: Mapped[str | None] = mapped_column(Text, nullable=True)
+    talking_point: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sales_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CompetitorSnapshot(Base):
@@ -256,6 +328,8 @@ class CrmActivity(Base):
     to_stage: Mapped[str | None] = mapped_column(String(40), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # işlemi yapan kullanıcı (eski kayıtlarda boş)
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # teklif/satış tutarı, hizmet, kayıp nedeni, takip tarihi (olay ayrıntısı)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -285,10 +359,134 @@ class IntegrationRegistry(Base):
 
 
 class User(Base):
+    """Uygulama kullanıcısı. Kullanıcılar fiziksel olarak SİLİNMEZ; pasifleştirilir (eski CRM/analiz kayıtları korunur)."""
+
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(30), nullable=False, default="admin")
+    name: Mapped[str] = mapped_column(String(255), nullable=False)  # Ad Soyad
+    username: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True)
+    role: Mapped[str] = mapped_column(String(30), nullable=False, default="calisan")  # yonetici | calisan | stajyer
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)  # scrypt (bkz. services/auth/security.py); düz metin ASLA saklanmaz
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+
+
+class UserSession(Base):
+    """Sunucu tarafı oturum: çerezde yalnızca rastgele token durur, veritabanında yalnızca SHA-256 özeti saklanır."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    remember: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # 'Beni hatırla': kalıcı çerez + uzun kayan süre
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class ActivityLog(Base):
+    """Personel aktivite geçmişi: kim, ne zaman, hangi firmada, ne yaptı (yalnızca eklenir)."""
+
+    __tablename__ = "activity_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # başarısız girişte boş olabilir
+    action: Mapped[str] = mapped_column(String(60), nullable=False)  # bkz. services/auth/activity.py ACTIONS
+    business_id: Mapped[int | None] = mapped_column(ForeignKey("businesses.id"), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)  # okunabilir Türkçe ayrıntı ("Arandı → Teklif Gönderildi")
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SystemSetting(Base):
+    """Sistem ayarları (ör. Google API). Sırlar yalnızca `secret_encrypted` içinde ŞİFRELİ saklanır ve arayüze asla geri gönderilmez."""
+
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class ServicePrice(Base):
+    """Yönetici tarafından girilen hizmet fiyat aralıkları (kodda sabit fiyat YOK). Fiyat girilmemişse arayüz 'Fiyatlandırma yapılmadı' der."""
+
+    __tablename__ = "service_prices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("services_catalog.id"), nullable=False, unique=True)
+    min_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    max_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    default_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PasswordResetToken(Base):
+    """Tek kullanımlık, süreli şifre belirleme/sıfırlama bağlantısı. Veritabanında yalnızca token'ın SHA-256 özeti tutulur."""
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False, default="reset")  # reset | invite
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class UserAnalysis(Base):
+    """KULLANICI BAZLI analiz geçmişi: bir kullanıcının bir işletme için tamamladığı BAŞARILI analiz (user_id + business_id + analysis_type tekildir).
+
+    'Daha önce analiz edildi' yalnızca bakan kullanıcının kendi kaydı varsa gösterilir; işletmenin sistemde bulunması ya da başka bir kullanıcının analizi bunu doğurmaz.
+    Her analiz işlemi (tekrarlar dahil) ayrıca `analysis_jobs`'ta durur; bu tablo kullanıcı+işletme başına ÖZET (son başarılı analiz) tutar.
+    """
+
+    __tablename__ = "user_analyses"
+    __table_args__ = (UniqueConstraint("user_id", "business_id", "analysis_type", name="uq_user_analysis"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
+    analysis_type: Mapped[str] = mapped_column(String(30), nullable=False, default="deep")
+    analysis_job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id"), nullable=True)
+    analysis_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # özet: durum, skor, seviye (ayrıntı sales_assessments'ta)
+    runs: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # bu kullanıcının bu işletme için başarılı analiz sayısı
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class FollowUp(Base):
+    """Takip: bir işletme için bir kullanıcının planladığı geri dönüş (tarih + saat + not + durum). Bir işletmede birden çok takip olabilir."""
+
+    __tablename__ = "follow_ups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # takipten sorumlu kullanıcı
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    has_time: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # saat girildi mi (yoksa yalnızca gün)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="Bekliyor", server_default="Bekliyor")  # Bekliyor | Tamamlandı | İptal
+    result: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
+from typing import Callable
 
 from sqlalchemy.orm import Session
 
 from packages.db.base import SessionLocal
-from packages.db.models import Business, BusinessMetric, DiscoveryJob, DiscoveryJobResult, Region, Sector
+from packages.localization import normalize_host
+from services.research.dedupe import same_business
+from packages.db.models import AnalysisJob, Business, BusinessMetric, DiscoveryJob, DiscoveryJobResult, Region, Sector
 from services.integrations.google_places.base import PlaceResult, SearchOutcome
 from services.integrations.google_places.factory import get_places_provider
 from services.worker.celery_app import celery_app
+from services.worker.tasks.analysis import run_analysis_job_task
 
 
 @celery_app.task(name="worker.ping")
@@ -29,9 +33,37 @@ def _record_metric(db: Session, business: Business, metric_key: str, value, sour
     )
 
 
+def _source_profile(item: PlaceResult) -> dict:
+    """Kaynaktan gelen ek profil verisi — sadece kaynağın gerçekten verdiği alanlar."""
+    profile = dict(item.profile or {})
+    profile["categories"] = item.categories
+    if item.source_url:
+        profile["source_url"] = item.source_url
+    if item.photo_count is not None:
+        profile["photos_capped"] = item.photos_capped
+    if item.reviews_sampled is not None:
+        profile["reviews_sampled"] = item.reviews_sampled
+    return profile
+
+
 def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceResult, source: str) -> tuple[Business, bool]:
     """Returns (business, is_new). Dedup key: google_place_id."""
     existing = db.query(Business).filter_by(google_place_id=item.external_ref).one_or_none()
+    if existing is None and item.lat is not None and item.lng is not None:
+        # Farklı bir Google kaydı olarak gelse de AYNI işletme olabilir (ad + konum + telefon): yeni kayıt açılmaz, mevcut işletme kullanılır.
+        box = 0.002  # ≈ 220 m
+        nearby = db.query(Business).filter(Business.lat.between(item.lat - box, item.lat + box), Business.lng.between(item.lng - box, item.lng + box)).all()
+        candidate = {"name": item.name, "phone": item.phone, "lat": item.lat, "lng": item.lng}
+        existing = next((b for b in nearby if same_business(candidate, {"name": b.name, "phone": b.phone, "lat": b.lat, "lng": b.lng})[0]), None)
+    if existing is None and item.website:
+        # Aynı işletme farklı kaynak kaydı olarak gelebilir (ör. OSM'de iki kayıt, www'li/www'suz adres):
+        # aynı bölge+sektörde aynı web sitesi alan adına sahip kayıt varsa yeni işletme açılmaz.
+        host = normalize_host(item.website)
+        candidates = db.query(Business).filter(
+            Business.region_id == region.id, Business.sector_id == sector.id, Business.website.isnot(None)
+        ).all()
+        existing = next((c for c in candidates if normalize_host(c.website) == host), None)
+    now = datetime.now(timezone.utc)
 
     if existing is not None:
         # Duplicate/re-discovery: sadece gerçekten yeni veri varsa güncelle, boş tekrar sonuçlarla eski veriyi ezme.
@@ -53,6 +85,14 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
             existing.email = item.email
         if item.opening_hours:
             existing.opening_hours = item.opening_hours
+        if item.category_label:
+            existing.category_label = item.category_label
+        if item.maps_url:
+            existing.maps_url = item.maps_url
+        if item.last_review_at:
+            existing.last_review_at = item.last_review_at
+        existing.source_profile = _source_profile(item)
+        existing.source_checked_at = now
         db.flush()
         return existing, False
 
@@ -72,6 +112,11 @@ def _upsert_business(db: Session, region: Region, sector: Sector, item: PlaceRes
         photo_count=item.photo_count,
         opening_hours=item.opening_hours,
         discovery_source=source,
+        category_label=item.category_label,
+        maps_url=item.maps_url,
+        last_review_at=item.last_review_at,
+        source_checked_at=now,
+        source_profile=_source_profile(item),
         status="discovered",
     )
     db.add(business)
@@ -93,7 +138,32 @@ def _link_job_result(db: Session, job: DiscoveryJob, business: Business) -> None
         db.add(DiscoveryJobResult(job_id=job.id, business_id=business.id))
 
 
-def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
+def queue_analysis(db: Session, business_ids: list[int], user_id: int | None = None) -> list[int]:
+    """Henüz analiz edilmemiş işletmeler için analiz görevi oluşturup kuyruğa alır.
+
+    Döndürür: kuyruğa alınan AnalysisJob id'leri. Zaten analiz edilmiş/edilmekte olan
+    işletmeler atlanır (gereksiz tekrar tarama yapılmaz).
+    """
+    job_ids: list[int] = []
+    for business in db.query(Business).filter(Business.id.in_(business_ids), Business.status.in_(("discovered", "analysis_failed"))).all():
+        analysis_job = AnalysisJob(business_id=business.id, user_id=user_id)  # analizi başlatan kullanıcı (aramayı yapan)
+        db.add(analysis_job)
+        business.status = "analyzing"
+        db.flush()
+        job_ids.append(analysis_job.id)
+    db.commit()
+    for analysis_job_id in job_ids:
+        run_analysis_job_task.delay(analysis_job_id)
+    return job_ids
+
+
+def run_discovery_job(
+    db: Session,
+    discovery_job_id: int,
+    on_new_businesses: Callable[[list[int]], None] | None = None,
+) -> DiscoveryJob:
+    """on_new_businesses: her veri grubu DB'ye yazılıp commit edildikçe, o gruptaki işletme
+    id'leriyle çağrılır (worker burada analizi kuyruğa alır; testler vermez)."""
     job = db.get(DiscoveryJob, discovery_job_id)
     if job is None:
         raise ValueError(f"DiscoveryJob {discovery_job_id} bulunamadı")
@@ -116,6 +186,8 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
     if len(already_known) >= job.target_count:
         for business in already_known:
             _link_job_result(db, job, business)
+        if on_new_businesses:
+            on_new_businesses([b.id for b in already_known])
         job.found_new = 0
         job.found_existing = len(already_known)
         job.item_errors = []
@@ -132,17 +204,21 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
     def _process_batch(batch: list[PlaceResult]) -> None:
         """Sağlayıcıdan bir veri grubu (sayfa/genişletme denemesi) geldikçe hemen DB'ye
         yazar ve commit eder — kullanıcı arama bitmeden sonuçları görebilsin diye."""
+        batch_ids: list[int] = []
         for item in batch:
             if not item.success:
                 item_errors.append({"external_ref": item.external_ref, "reason": item.error_reason})
                 continue
             business, is_new = _upsert_business(db, region, sector, item, source=provider.name)
             _link_job_result(db, job, business)
+            batch_ids.append(business.id)
             counters["found_new" if is_new else "found_existing"] += 1
         job.found_new = counters["found_new"]
         job.found_existing = counters["found_existing"]
         job.item_errors = list(item_errors)
         db.commit()
+        if on_new_businesses and batch_ids:
+            on_new_businesses(batch_ids)
 
     try:
         outcome: SearchOutcome = provider.search(
@@ -174,10 +250,15 @@ def run_discovery_job(db: Session, discovery_job_id: int) -> DiscoveryJob:
 
 
 @celery_app.task(name="worker.run_discovery_job")
-def run_discovery_job_task(discovery_job_id: int) -> str:
+def run_discovery_job_task(discovery_job_id: int, auto_analyze: bool = True) -> str:
+    """auto_analyze=True: bulunan her işletme için Google profili + web sitesi analizi
+    otomatik başlatılır (kullanıcı tek tek 'Analiz Et'e basmak zorunda kalmaz)."""
     db = SessionLocal()
     try:
-        job = run_discovery_job(db, discovery_job_id)
+        discovery_row = db.get(DiscoveryJob, discovery_job_id)
+        starter_id = discovery_row.user_id if discovery_row else None
+        callback = (lambda ids: queue_analysis(db, ids, starter_id)) if auto_analyze else None
+        job = run_discovery_job(db, discovery_job_id, on_new_businesses=callback)
         return job.status
     finally:
         db.close()

@@ -17,3 +17,10 @@ out/
 
 # local dev artifacts
 /infra/pgdata/
+*.tsbuildinfo
+
+# ek koruma: gizli/yedek dosyalar asla commit edilmesin
+.env.*
+!.env.example
+*.dump
+*.pem

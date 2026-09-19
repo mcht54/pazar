@@ -11,5 +11,11 @@ python-dotenv==1.0.1
 httpx==0.27.2
 beautifulsoup4==4.12.3
 
+cryptography==43.0.3  # API anahtarı gibi sırların veritabanında şifreli saklanması (Fernet)
+tzdata==2026.4  # Europe/Istanbul dilimi (sayaçlar); slim imajlarda sistem saat dilimi veritabanı yoktur
+
 # test-only
 pytest==8.3.3
+playwright==1.63.0
+openpyxl==3.1.5
+aiosmtpd==1.4.6  # yalnızca testler: gerçek SMTP sunucusuna (yerel) e-posta gönderimi

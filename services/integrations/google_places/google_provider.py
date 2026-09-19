@@ -9,14 +9,17 @@ ve bizim 55 sektörümüzün çoğu (ör. "Web Tasarım", "Muhasebe") Google'ın
 type listesinde yok. Text Search serbest metin sorgusu + locationBias ile hem tag
 hem isim bazlı eşleşmeyi tek istekte kapsıyor ve New API'de asıl önerilen yöntem bu.
 
-Maliyet notu: FieldMask'te istediğimiz alanların çoğu (rating, review sayısı, telefon,
-website, açılış saatleri) Google'ın "Enterprise" SKU'suna giriyor — bu yüzden FieldMask
-kesinlikle gerekenle sınırlı tutulur, gereksiz alan istenmez (madde: "FieldMask kullanarak
-sadece gerçekten gerekli alanları iste").
+Maliyet notu: FieldMask'te istediğimiz alanların çoğu (puan, yorum sayısı, telefon, web sitesi,
+çalışma saatleri) Google'ın "Enterprise" SKU'suna giriyor; yorum tarihleri daha da üst bir
+SKU'ya girer. Bu yüzden FieldMask gerekenle sınırlı tutulur ve yorum alanı
+GOOGLE_PLACES_FETCH_REVIEWS=false ile kapatılabilir.
+
+Google'ın VERMEDİĞİ alanlar (işletme açıklaması, hizmet listesi, son fotoğraf tarihi, yorumlara
+işletme yanıtı) bu sağlayıcıda da None kalır ve analizde "Doğrulanamadı" olarak gösterilir.
 """
 
 import time
-from datetime import date
+from datetime import date, datetime
 
 import httpx
 from sqlalchemy.orm import Session
@@ -34,22 +37,36 @@ PAGE_SIZE = 20  # Google'ın izin verdiği maksimum
 MAX_PAGES = 3  # Text Search (New) toplamda en fazla ~60 sonuç (3 sayfa) verir
 PAGE_TOKEN_DELAY_SECONDS = 2.0  # bir sonraki sayfa token'ı aktif olana kadar kısa bekleme
 
-FIELD_MASK = ",".join(
-    [
-        "places.id",
-        "places.displayName",
-        "places.formattedAddress",
-        "places.location",
-        "places.nationalPhoneNumber",
-        "places.websiteUri",
-        "places.rating",
-        "places.userRatingCount",
-        "places.regularOpeningHours.weekdayDescriptions",
-        "places.businessStatus",
-        "places.types",
-        "nextPageToken",
-    ]
-)
+_BASE_FIELDS = [
+    "places.id",
+    "places.displayName",
+    "places.formattedAddress",
+    "places.location",
+    "places.nationalPhoneNumber",
+    "places.websiteUri",
+    "places.rating",
+    "places.userRatingCount",
+    "places.regularOpeningHours.weekdayDescriptions",
+    "places.businessStatus",
+    "places.types",
+    "places.primaryType",
+    "places.primaryTypeDisplayName",
+    "places.googleMapsUri",
+    "places.photos.name",  # sadece foto sayısı için — API en fazla 10 fotoğraf döndürür
+    "nextPageToken",
+]
+# Yorum tarihleri (son yorum ne zaman?) daha pahalı bir SKU'ya girer; ayarla kapatılabilir.
+_REVIEW_FIELDS = ["places.reviews.publishTime"]
+
+
+def _field_mask() -> str:
+    fields = list(_BASE_FIELDS)
+    if settings.google_places_fetch_reviews:
+        fields += _REVIEW_FIELDS
+    return ",".join(fields)
+
+
+MAX_PHOTOS_RETURNED = 10  # Google Places (New) bir yer için en fazla 10 fotoğraf referansı döndürür
 
 
 class GooglePlacesQuotaExceeded(RuntimeError):
@@ -96,7 +113,7 @@ class GooglePlacesProvider(PlacesProvider):
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": settings.google_places_api_key,
-            "X-Goog-FieldMask": FIELD_MASK,
+            "X-Goog-FieldMask": _field_mask(),
         }
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -122,6 +139,23 @@ class GooglePlacesProvider(PlacesProvider):
         if weekday_desc:
             opening_hours = "; ".join(weekday_desc)
 
+        photos = place.get("photos")
+        photo_count = len(photos) if photos is not None else 0
+        # API en fazla 10 fotoğraf verir: 10 geldiyse gerçek sayı "en az 10"dur.
+        photos_capped = photo_count >= MAX_PHOTOS_RETURNED
+
+        reviews = place.get("reviews") or []
+        review_times = []
+        for review in reviews:
+            published = review.get("publishTime")
+            if published:
+                try:
+                    review_times.append(datetime.fromisoformat(published.replace("Z", "+00:00")))
+                except ValueError:
+                    continue
+        last_review_at = max(review_times) if review_times else None
+
+        types = place.get("types", [])
         return PlaceResult(
             external_ref=f"google_{place['id']}",
             success=True,
@@ -133,9 +167,20 @@ class GooglePlacesProvider(PlacesProvider):
             website=place.get("websiteUri"),
             rating=place.get("rating"),
             review_count=place.get("userRatingCount"),
-            photo_count=None,  # photos alanı ayrı/pahalı bir SKU — FieldMask'e dahil edilmedi
+            photo_count=photo_count,
+            photos_capped=photos_capped,
             opening_hours=opening_hours,
-            categories=place.get("types", []),
+            categories=types,
+            category_label=(place.get("primaryTypeDisplayName") or {}).get("text"),
+            maps_url=place.get("googleMapsUri"),
+            source_url=place.get("googleMapsUri"),
+            last_review_at=last_review_at,
+            reviews_sampled=len(reviews) if settings.google_places_fetch_reviews else None,
+            profile={
+                "primary_type": place.get("primaryType"),
+                "types": types,
+                "business_status": place.get("businessStatus"),
+            },
         )
 
     def search(self, *, region: Region, sector: Sector, target_count: int, on_batch=None) -> SearchOutcome:

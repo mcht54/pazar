@@ -1,0 +1,172 @@
+[
+  {
+    "osm": {
+      "source": "openstreetmap",
+      "osm_ref": "osm_node_6005574729",
+      "name": "Hacı Arif Lokantası",
+      "address": null,
+      "phone": null,
+      "website": "https://www.haciariflokantasi.com/",
+      "lat": 40.7600981,
+      "lng": 30.3903796
+    },
+    "google_web": {
+      "status": "unmatched",
+      "source": "google_web",
+      "fetched_at": "2026-09-18T18:38:52.506186+00:00",
+      "query_url": "https://www.google.com/maps/search/Hac%C4%B1%20Arif%20Lokantas%C4%B1/@40.7600981,30.3903796,17z?hl=tr",
+      "candidates": [],
+      "match": {
+        "distance_m": null,
+        "name_similarity": 1.0
+      },
+      "data": null
+    }
+  },
+  {
+    "osm": {
+      "source": "openstreetmap",
+      "osm_ref": "osm_node_4072904176",
+      "name": "Serdivan Çorba Sarayı",
+      "address": "Prof. Dr. Necmettin Erbakan Bulvarı No:36, İstiklal Mahallesi, Serdivan, Sakarya",
+      "phone": null,
+      "website": null,
+      "lat": 40.7675991,
+      "lng": 30.3641616
+    },
+    "google_web": {
+      "status": "unmatched",
+      "source": "google_web",
+      "fetched_at": "2026-09-18T18:39:01.958569+00:00",
+      "query_url": "https://www.google.com/maps/search/Serdivan%20%C3%87orba%20Saray%C4%B1/@40.7675991,30.3641616,17z?hl=tr",
+      "candidates": [],
+      "match": {
+        "distance_m": null,
+        "name_similarity": 0.74
+      },
+      "data": null
+    }
+  },
+  {
+    "osm": {
+      "source": "openstreetmap",
+      "osm_ref": "osm_node_4395766733",
+      "name": "Meşhur Köfteci Mustafa",
+      "address": "Sakarya Caddesi No:12",
+      "phone": null,
+      "website": null,
+      "lat": 40.7719275,
+      "lng": 30.4046678
+    },
+    "google_web": {
+      "status": "unmatched",
+      "source": "google_web",
+      "fetched_at": "2026-09-18T18:39:11.011745+00:00",
+      "query_url": "https://www.google.com/maps/search/Me%C5%9Fhur%20K%C3%B6fteci%20Mustafa/@40.7719275,30.4046678,17z?hl=tr",
+      "candidates": [],
+      "match": {
+        "distance_m": null,
+        "name_similarity": 1.0
+      },
+      "data": null
+    }
+  },
+  {
+    "osm": {
+      "source": "openstreetmap",
+      "osm_ref": "osm_node_3820194682",
+      "name": "Altın Kasap Izgara",
+      "address": null,
+      "phone": null,
+      "website": null,
+      "lat": 40.7644416,
+      "lng": 30.3609687
+    },
+    "google_web": {
+      "status": "unmatched",
+      "source": "google_web",
+      "fetched_at": "2026-09-18T18:39:20.134818+00:00",
+      "query_url": "https://www.google.com/maps/search/Alt%C4%B1n%20Kasap%20Izgara/@40.7644416,30.3609687,17z?hl=tr",
+      "candidates": [
+        {
+          "index": 0,
+          "name": "Altın Kasap Serdivan",
+          "distance_m": 8,
+          "name_similarity": 0.74
+        },
+        {
+          "index": 1,
+          "name": "Altin Kasap",
+          "distance_m": 2137,
+          "name_similarity": 1.0
+        }
+      ],
+      "match": {
+        "distance_m": 8,
+        "name_similarity": 0.23
+      },
+      "data": null
+    }
+  },
+  {
+    "osm": {
+      "source": "openstreetmap",
+      "osm_ref": "osm_node_4072904175",
+      "name": "Callavi",
+      "address": null,
+      "phone": null,
+      "website": null,
+      "lat": 40.76675,
+      "lng": 30.3737214
+    },
+    "google_web": {
+      "status": "matched",
+      "source": "google_web",
+      "fetched_at": "2026-09-18T18:39:31.341020+00:00",
+      "query_url": "https://www.google.com/maps/search/Callavi/@40.76675,30.3737214,17z?hl=tr",
+      "candidates": [
+        {
+          "index": 0,
+          "name": "Callavi Ümraniye",
+          "distance_m": 110625,
+          "name_similarity": 1.0
+        },
+        {
+          "index": 1,
+          "name": "Kallavi Kahve- Marmara Forum AVM",
+          "distance_m": 127684,
+          "name_similarity": 0.31
+        },
+        {
+          "index": 2,
+          "name": "Callavi Tufting",
+          "distance_m": 727918,
+          "name_similarity": 1.0
+        },
+        {
+          "index": 3,
+          "name": "Callavi Dondurma",
+          "distance_m": 19,
+          "name_similarity": 1.0
+        },
+        {
+          "index": 4,
+          "name": "Callavi Libadiye",
+          "distance_m": 112530,
+          "name_similarity": 1.0
+        }
+      ],
+      "match": {
+        "distance_m": 19,
+        "name_similarity": 1.0
+      },
+      "data": {
+        "name": "Callavi Dondurma",
+        "address": "İstiklal, Muhsin Yazıcıoğlu Blv. No:61 D:2, 54100 Serdivan/Sakarya",
+        "phone": "0552 162 05 70",
+        "website": null,
+        "place_url": "https://www.google.com/maps/place/Callavi+Dondurma/@40.7668324,30.3691521,17z/data=!4m10!1m2!2m1!1sCallavi!3m6!1s0x14ccb35970df23d7:0x9821b2e29099d995!8m2!3d40.7668324!4d30.3739157!15sCgdDYWxsYXZpWgkiB2NhbGxhdmmSAQ5pY2VfY3JlYW1fc2hvcJoBI0NoWkRTVWhOTUc5blMwVkpRMEZuU1VOd2FXRjZPVlYzRUFF4AEA-gEECAAQTA!16s%2Fg%2F11q8xbkb6b?hl=tr&entry=ttu&g_ep=EgoyMDI2MDkxNS4wIKXMDSoASAFQAw%3D%3D"
+      }
+    }
+  }
+]
