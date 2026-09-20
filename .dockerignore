@@ -3,6 +3,10 @@
 .env
 .env.*
 !.env.example
+# alt dizinlerdeki yerel env dosyaları (örn. apps/web/.env.local) NEXT_PUBLIC_* değerini derlemeye sızdırmasın
+**/.env
+**/.env.*
+!**/.env.example
 .venv
 venv
 **/__pycache__

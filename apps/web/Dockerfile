@@ -10,7 +10,12 @@ ARG NEXT_PUBLIC_API_BASE_URL=""
 ARG API_INTERNAL_URL="http://api:8000"
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
     API_INTERNAL_URL=$API_INTERNAL_URL
-RUN npm run build
+# Bekçi: tarayıcıya giden pakete localhost/127.0.0.1 API adresi gömülmüşse build BAŞARISIZ olur (eski/yanlış imajın sessizce yayına çıkmasını engeller).
+RUN npm run build \
+ && if grep -rEq "(localhost|127\.0\.0\.1|0\.0\.0\.0):[0-9]+" .next/static; then \
+      echo "HATA: tarayici paketine localhost API adresi gomulmus (NEXT_PUBLIC_API_BASE_URL='$NEXT_PUBLIC_API_BASE_URL'). Uretimde bos birakin: ayni kokende /api kullanilir." >&2; \
+      exit 1; \
+    fi
 
 FROM node:20-slim
 WORKDIR /app

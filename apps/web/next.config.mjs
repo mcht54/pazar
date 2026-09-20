@@ -13,6 +13,11 @@ const nextConfig = {
   // Depo kökünde ayrı bir package-lock.json var; Next.js'in yanlış çalışma kökü seçmemesi için sabitlenir.
   turbopack: { root: here },
   agentRules: false,
+  // HTML sayfaları her açılışta doğrulanır: dağıtımdan sonra tarayıcı/CDN eski sayfayı (ve eski JS paketine giden bağlantıları) tutmasın.
+  // `/_next/static/*` içerik özetli (hash'li) dosyalardır, Next.js bunları zaten kalıcı önbelleğe alır; `/api` API'nin kendi başlıklarını kullanır.
+  async headers() {
+    return [{ source: "/((?!_next/static|_next/image|api/).*)", headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }] }];
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiInternalUrl}/api/:path*` }];
   },

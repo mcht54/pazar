@@ -145,3 +145,16 @@ def test_cookie_settings_parse_from_env_strings():
 
     with pytest.raises(ValueError):
         Settings(cookie_samesite="bogus")
+
+
+def test_startup_warns_when_development_env_meets_https_web_url(monkeypatch):
+    from apps.api.main import env_misconfiguration_warnings
+
+    monkeypatch.setattr(settings, "env", "development")
+    monkeypatch.setattr(settings, "web_base_url", "http://localhost:3000")
+    assert env_misconfiguration_warnings() == []
+    monkeypatch.setattr(settings, "web_base_url", "https://pazar.mchttasarim.com.tr")
+    (msg,) = env_misconfiguration_warnings()
+    assert "ENV=production" in msg and "pazar.mchttasarim.com.tr" in msg
+    monkeypatch.setattr(settings, "env", "production")
+    assert env_misconfiguration_warnings() == [], "doğru yapılandırmada uyarı yok"

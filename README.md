@@ -145,7 +145,20 @@ Tarayıcı **tek bir kökenle** konuşur (örn. `https://pazar.mchttasarim.com.t
 - Nginx `/api`'yi yönlendirmezse istek Next.js'e ulaşır ve `next.config.mjs`'deki `/api` rewrite'ı API'ye aktarır (`API_INTERNAL_URL`, varsayılan `http://api:8000`). Tercih edilen yol yine Nginx'tir.
 - Oturum çerezi `mch_session`: `HttpOnly`, `Path=/`, `SameSite=Lax`, host-only (Domain yok); `ENV=production` iken otomatik `Secure`. `.env` içinde `ENV=production`, `WEB_BASE_URL=https://pazar.mchttasarim.com.tr` ve `API_CORS_ORIGINS=https://pazar.mchttasarim.com.tr` olmalıdır. Ayarlar: `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN`.
 - Oturum denetimi (`/api/auth/me`) 10 sn zaman aşımına sahiptir: giriş yoksa login ekranı, sunucuya ulaşılamazsa "Tekrar dene" düğmeli hata kartı gösterilir; arayüz sonsuz "Oturum kontrol ediliyor…" durumunda kalmaz.
-- Web imajı değiştiğinde: `docker compose -f infra/docker-compose.yml build --no-cache web && docker compose -f infra/docker-compose.yml up -d web`.
+- `API_INTERNAL_URL` (rewrite hedefi) da **build-time**'dır: `next start` sırasında verilen değer yok sayılır. Bu yüzden compose'ta `web.build.args` altındadır; `web.environment` altına yazılmaz.
+- `infra/docker-compose.yml` `api` ve `worker` için `ENV=production` verir; sunucudaki `.env` kopyası `ENV=development` kalsa bile `/api/health` `"env":"production"` döner ve çerez `Secure` olur. API, `ENV=development` iken `WEB_BASE_URL` https ise başlangıçta uyarı loglar.
+- Dockerfile bir bekçi içerir: `next build` çıktısındaki tarayıcı paketine `localhost:PORT` adresi gömülmüşse **build başarısız olur** (yanlış bir imaj sessizce yayına çıkmaz).
+
+**Dağıtım (sunucuda) — kod GitHub'a push edilmeden sunucuya ulaşmaz:**
+```bash
+git pull && git log -1 --oneline                      # push ettiğiniz commit'in SHA'sı görünmeli
+docker compose -f infra/docker-compose.yml build --no-cache web api worker
+docker compose -f infra/docker-compose.yml up -d
+# doğrulama (secret basmaz):
+curl -s https://pazar.mchttasarim.com.tr/api/health   # "env":"production"
+docker compose -f infra/docker-compose.yml exec web sh -c 'grep -rEl "(localhost|127\.0\.0\.1):[0-9]+" .next/static | wc -l'   # 0 olmalı
+```
+Tarayıcıda Ctrl/Cmd+Shift+R ile sert yenileme yapın; HTML sayfaları artık `Cache-Control: no-cache` ile geldiği için normal yenileme de yeni paketi alır.
 
 ## Yerel Geliştirme (Docker olmadan)
 

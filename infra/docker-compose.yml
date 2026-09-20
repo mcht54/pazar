@@ -34,6 +34,10 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
+    environment:
+      # Bu dosya sunucu (üretim) dağıtımı içindir: .env kopyası ENV=development bırakılsa bile API üretim modunda çalışır
+      # (çerez Secure, /api/health env=production). HTTP üzerinden yerel Docker denemesi için .env'e COOKIE_SECURE=false ekleyin.
+      ENV: production
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +53,8 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env
+    environment:
+      ENV: production
     depends_on:
       postgres:
         condition: service_healthy

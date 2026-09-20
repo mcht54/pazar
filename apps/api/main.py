@@ -38,6 +38,20 @@ def _normalize_legacy_crm_stages() -> None:
         logger.exception("Eski CRM durum adları normalize edilemedi")
 
 
+def env_misconfiguration_warnings() -> list[str]:
+    """Üretim adresi (https) ile ENV=development çelişkisi: çerez Secure olmaz, /api/health yanıltıcı görünür. Secret değerleri asla yazılmaz."""
+    warnings = []
+    if settings.env == "development" and settings.web_base_url.lower().startswith("https://"):
+        warnings.append("ENV=development ama WEB_BASE_URL https adresi (%s): sunucu .env dosyasında ENV=production olmalı." % settings.web_base_url)
+    return warnings
+
+
+@app.on_event("startup")
+def _warn_env_misconfiguration() -> None:
+    for message in env_misconfiguration_warnings():
+        logger.warning(message)
+
+
 CSRF_HEADER = "x-requested-with"
 CSRF_VALUE = "mch-app"
 
