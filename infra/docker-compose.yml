@@ -51,6 +51,8 @@ services:
       context: ..
       dockerfile: services/worker/Dockerfile
     restart: unless-stopped
+    # Chromium /dev/shm kullanır; Docker varsayılanı (64MB) ağır sayfalarda tarayıcıyı çökertebilir.
+    shm_size: "1gb"
     env_file:
       - ../.env
     environment:
