@@ -59,9 +59,12 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* build-time'dır: runtime `environment:` ile verilemez (paket zaten derlenmiştir), bu yüzden build arg.
+      # Varsayılan: tarayıcı aynı kökene `/api/...` ile gider (Nginx → api:8000); ayrı API alan adı gerekirse burada verilir.
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ""
+        API_INTERNAL_URL: http://api:8000
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     depends_on:
       - api
     ports:

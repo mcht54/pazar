@@ -1,20 +1,41 @@
-# Üretim VPS'i için taslak — Certbot ile SSL kurulumu ve gerçek domain
-# tanımlandığında (deployment sprint'i) docker-compose'a bir `nginx` servisi
-# olarak eklenecek. Sprint 0'da sadece referans amaçlıdır, henüz devrede değildir.
+# Üretim (VPS) Nginx örneği — https://pazar.mchttasarim.com.tr
+#
+# Mimari: tarayıcı TEK bir kökenle konuşur (aynı alan adı). Nginx yolu ayırır:
+#   /api/*  → FastAPI  (127.0.0.1:8000)   ← oturum çerezi (HttpOnly) burada set edilir
+#   diğer   → Next.js  (127.0.0.1:3000)
+# Bu sayede web imajında API adresi gömmeye, CORS'a veya çapraz-site çerezlerine gerek kalmaz.
+# Nginx docker-compose içinde bir servis olarak çalışıyorsa 127.0.0.1:8000 → api:8000, 127.0.0.1:3000 → web:3000 yazın.
 
 server {
     listen 80;
-    server_name _;
+    server_name pazar.mchttasarim.com.tr;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name pazar.mchttasarim.com.tr;
+
+    # Certbot bu satırları kendisi yönetir
+    ssl_certificate     /etc/letsencrypt/live/pazar.mchttasarim.com.tr/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pazar.mchttasarim.com.tr/privkey.pem;
+
+    client_max_body_size 20m;
+
+    # Ortak vekil başlıkları
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
 
     location /api/ {
-        proxy_pass http://api:8000/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://127.0.0.1:8000;   # URI değiştirilmez: /api/auth/me → /api/auth/me
+        proxy_read_timeout 120s;
     }
 
     location / {
-        proxy_pass http://web:3000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_pass http://127.0.0.1:3000;
     }
 }

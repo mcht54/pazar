@@ -34,7 +34,17 @@ import type {
   Sector,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+/**
+ * API adresi. NEXT_PUBLIC_* değerleri `next build` sırasında pakete GÖMÜLÜR; çalışma anında değiştirilemez.
+ * - Üretim (varsayılan): "" → aynı köken. Tarayıcı `/api/...` yoluna gider; Nginx `/api`'yi API'ye yönlendirir
+ *   (Nginx yoksa next.config.mjs'deki `/api` rewrite'ı aynı işi yapar). Böylece çerez aynı kökende kalır, CORS gerekmez.
+ * - Geliştirme (`next dev`): API ayrı portta (localhost:8000) çalışır.
+ * - Ayrı bir API alan adı gerekiyorsa build sırasında NEXT_PUBLIC_API_BASE_URL verilir (örn. https://api.example.com).
+ */
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "")).replace(/\/+$/, "");
+
+/** Oturum denetimi gibi arayüzü bloke eden istekler yanıtsız kalırsa sonsuza dek beklenmez. */
+const AUTH_TIMEOUT_MS = 10_000;
 
 /** Oturum çerezi (HttpOnly) her istekte gönderilir; değiştirici isteklerde CSRF başlığı zorunludur. */
 const COMMON_HEADERS = { "X-Requested-With": "mch-app" };
@@ -53,17 +63,23 @@ function notifyAuth(res: Response) {
   if (res.status === 403 && res.headers.get("X-Auth") === "password-change") window.dispatchEvent(new Event("mch:password-change"));
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const { timeoutMs, ...fetchInit } = init ?? {};
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      ...init,
+      ...fetchInit,
+      signal: controller?.signal,
       cache: "no-store",
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...COMMON_HEADERS, ...(init?.headers ?? {}) },
+      headers: { "Content-Type": "application/json", ...COMMON_HEADERS, ...(fetchInit.headers ?? {}) },
     });
   } catch {
-    throw new ApiError("Sunucuya ulaşılamadı. API'nin çalıştığından emin olun (http://localhost:8000).", 0);
+    throw new ApiError(controller?.signal.aborted ? "Sunucu zamanında yanıt vermedi. Lütfen tekrar deneyin." : "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.", 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   if (!res.ok) {
     notifyAuth(res);
@@ -86,7 +102,7 @@ async function download(path: string, body: unknown, fallbackName: string): Prom
   try {
     res = await fetch(`${API_BASE}${path}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", ...COMMON_HEADERS }, body: JSON.stringify(body) });
   } catch {
-    throw new Error("Sunucuya ulaşılamadı. API'nin çalıştığından emin olun.");
+    throw new Error("Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.");
   }
   if (!res.ok) {
     notifyAuth(res);
@@ -174,9 +190,9 @@ export const api = {
     return request<Guide>(`/api/guides/${id}?${qs.toString()}`);
   },
   // --- kimlik doğrulama
-  login: (identifier: string, password: string, remember = false) => request<AuthUser>("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, remember }) }),
+  login: (identifier: string, password: string, remember = false) => request<AuthUser>("/api/auth/login", { method: "POST", body: JSON.stringify({ identifier, password, remember }), timeoutMs: 30_000 }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
-  me: () => request<AuthUser>("/api/auth/me"),
+  me: () => request<AuthUser>("/api/auth/me", { timeoutMs: AUTH_TIMEOUT_MS }),
   changePassword: (current_password: string, new_password: string) =>
     request<AuthUser>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password, new_password }) }),
 

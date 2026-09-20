@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     remember_days: int = 30  # 'Beni hatırla' işaretliyse kalıcı çerez ve kayan oturum süresi
     remember_max_days: int = 90  # 'Beni hatırla' oturumunun mutlak üst sınırı
 
+    # Oturum çerezi (mch_session). Üretimde arayüz ve API aynı kökende (https://alan-adi + Nginx /api) çalıştığı için varsayılanlar yeterlidir.
+    cookie_secure: bool | None = None  # None → ENV=development değilse Secure (yalnızca HTTPS). Yerelde HTTP ile prod benzeri test için COOKIE_SECURE=false
+    cookie_samesite: str = "lax"  # lax | strict | none ('none' yalnızca Secure ile geçerlidir; ayrı-site API alan adı gerektiğinde)
+    cookie_domain: str = ""  # boş = yalnızca bu host (önerilen). Alt alan adları arası paylaşım gerekmedikçe doldurmayın
+
     anthropic_api_key: str = ""
     google_places_api_key: str = ""
     # Places API (New) Text Search adresi. Yalnızca test/yerel ortamlarda (Google'a istek atmadan sahte sunucuya yönlendirmek için) değiştirilir.
@@ -36,6 +41,27 @@ class Settings(BaseSettings):
         if isinstance(value, str) and value.strip().lower() in ("osm", "overpass", "openstreetmap"):
             return "google_maps"
         return value
+
+    @field_validator("cookie_secure", mode="before")
+    @classmethod
+    def _empty_cookie_secure_is_auto(cls, value):
+        """`COOKIE_SECURE=` (boş) satırı .env'de 'otomatik' anlamına gelir."""
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("cookie_samesite", mode="before")
+    @classmethod
+    def _valid_samesite(cls, value):
+        v = str(value).strip().lower() or "lax"
+        if v not in ("lax", "strict", "none"):
+            raise ValueError("COOKIE_SAMESITE lax, strict veya none olmalıdır")
+        return v
+
+    @property
+    def session_cookie_secure(self) -> bool:
+        """Secure bayrağı: açıkça verilmediyse geliştirme dışında her zaman açık; SameSite=None her zaman Secure ister."""
+        if self.cookie_samesite == "none":
+            return True
+        return self.cookie_secure if self.cookie_secure is not None else self.env != "development"
 
     @property
     def cors_origins_list(self) -> list[str]:

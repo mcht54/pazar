@@ -136,6 +136,17 @@ docker compose -f infra/docker-compose.yml exec api python -m packages.db.seed
 
 Panel: http://localhost:3000 · API sağlık kontrolü: http://localhost:8000/api/health
 
+### Üretim (VPS, Nginx + HTTPS) — aynı köken mimarisi
+
+Tarayıcı **tek bir kökenle** konuşur (örn. `https://pazar.mchttasarim.com.tr`); Nginx yolu ayırır: `/api/*` → API (`:8000`), diğer her şey → web (`:3000`).
+Örnek yapılandırma: [`infra/nginx/nginx.conf.example`](infra/nginx/nginx.conf.example).
+
+- **Web imajında API adresi gömülmez.** `NEXT_PUBLIC_*` değişkenleri `next build` sırasında pakete işlenir, çalışma anında (`environment:`) değiştirilemez. Bu yüzden varsayılan boştur ve tarayıcı `/api/...` göreli yoluna gider. Ayrı bir API alan adı gerekiyorsa `infra/docker-compose.yml` içindeki `web.build.args.NEXT_PUBLIC_API_BASE_URL` doldurulup imaj yeniden derlenir (`--build`).
+- Nginx `/api`'yi yönlendirmezse istek Next.js'e ulaşır ve `next.config.mjs`'deki `/api` rewrite'ı API'ye aktarır (`API_INTERNAL_URL`, varsayılan `http://api:8000`). Tercih edilen yol yine Nginx'tir.
+- Oturum çerezi `mch_session`: `HttpOnly`, `Path=/`, `SameSite=Lax`, host-only (Domain yok); `ENV=production` iken otomatik `Secure`. `.env` içinde `ENV=production`, `WEB_BASE_URL=https://pazar.mchttasarim.com.tr` ve `API_CORS_ORIGINS=https://pazar.mchttasarim.com.tr` olmalıdır. Ayarlar: `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN`.
+- Oturum denetimi (`/api/auth/me`) 10 sn zaman aşımına sahiptir: giriş yoksa login ekranı, sunucuya ulaşılamazsa "Tekrar dene" düğmeli hata kartı gösterilir; arayüz sonsuz "Oturum kontrol ediliyor…" durumunda kalmaz.
+- Web imajı değiştiğinde: `docker compose -f infra/docker-compose.yml build --no-cache web && docker compose -f infra/docker-compose.yml up -d web`.
+
 ## Yerel Geliştirme (Docker olmadan)
 
 ```bash
@@ -166,7 +177,9 @@ cd apps/web && npm install && npm run dev                                       
 | `GOOGLE_PLACES_FETCH_REVIEWS` | Son yorum tarihi için yorum alanını da iste (daha pahalı SKU), varsayılan `true` | Hayır |
 | `GOOGLE_PAGESPEED_API_KEY` | Gerçek mobil sayfa hızı puanı (anahtarsız kota sıfırdır) | Hayır |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | Opsiyonel AI yorumlama (varsayılan `none`; sistem AI olmadan tam çalışır) | Hayır |
-| `API_SECRET_KEY`, `API_CORS_ORIGINS`, `NEXT_PUBLIC_API_BASE_URL` | Backend/CORS/frontend adresi | Evet (varsayılanlar dev için yeterli) |
+| `API_SECRET_KEY`, `API_CORS_ORIGINS`, `WEB_BASE_URL` | Backend gizli anahtarı / CORS / e-posta bağlantı adresi (üretimde `https://alan-adi`) | Evet (varsayılanlar dev için yeterli) |
+| `COOKIE_SECURE`, `COOKIE_SAMESITE`, `COOKIE_DOMAIN` | Oturum çerezi (varsayılan: `ENV=production` iken Secure, Lax, host-only) | Hayır |
+| `NEXT_PUBLIC_API_BASE_URL` | Yalnızca `next dev` için (varsayılan `http://localhost:8000`). Build-time'dır; üretimde boş bırakılır (aynı köken `/api`) | Hayır |
 
 **Güvenlik:** `.env` Git'e eklenmez; API anahtarları yalnızca backend'de okunur.
 

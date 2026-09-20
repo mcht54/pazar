@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import type { AuthUser } from "@/lib/types";
 import { clearSearchStore } from "./search-store";
 
@@ -11,6 +11,8 @@ import { clearSearchStore } from "./search-store";
 interface AuthValue {
   user: AuthUser | null;
   loading: boolean;
+  /** Oturum denetimi sunucuya ulaşamadıysa (ağ/zaman aşımı/5xx) açıklama; 401 (giriş yapılmamış) hata sayılmaz. */
+  authError: string | null;
   can: (permission: string) => boolean;
   login: (identifier: string, password: string, remember?: boolean) => Promise<AuthUser>;
   logout: () => Promise<void>;
@@ -42,17 +44,22 @@ function rememberUser(user: AuthUser | null) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const setUser = useCallback((next: AuthUser | null) => {
     rememberUser(next);
     setUserState(next);
   }, []);
 
+  // Oturum denetimi HER durumda sonlanır (api.me zaman aşımına sahiptir): giriş yok → login ekranı; sunucu sorunu → hata + "Tekrar dene".
   const refresh = useCallback(async () => {
     try {
       setUser(await api.me());
-    } catch {
+      setAuthError(null);
+    } catch (err) {
       setUser(null);
+      const unauthenticated = err instanceof ApiError && err.status === 401;
+      setAuthError(unauthenticated ? null : err instanceof ApiError && err.status !== 0 ? `Oturum durumu alınamadı (sunucu yanıtı: ${err.status}).` : (err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -60,7 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     refresh();
-    const onUnauthorized = () => setUserState(null);
+    const onUnauthorized = () => {
+      setUserState(null);
+      setAuthError(null);
+    };
     const onPasswordChange = () => refresh();
     window.addEventListener("mch:unauthorized", onUnauthorized);
     window.addEventListener("mch:password-change", onPasswordChange);
@@ -74,9 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       loading,
+      authError,
       can: (permission) => !!user && user.permissions.includes(permission),
       login: async (identifier, password, remember = false) => {
         const u = await api.login(identifier, password, remember);
+        setAuthError(null);
         setUser(u);
         return u;
       },
@@ -86,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           clearSearchStore();
           setUserState(null);
+          setAuthError(null);
           try {
             sessionStorage.removeItem(LAST_USER_KEY);
           } catch {
@@ -96,14 +109,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refresh,
       setUser,
     }),
-    [user, loading, refresh, setUser]
+    [user, loading, authError, refresh, setUser]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 /** Korumalı alan: giriş yapmamışsa /login'e; geçici şifreyle girmişse şifre değiştirme ekranına; yönetim sayfalarında yönetici değilse engel ekranı. */
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, authError, refresh } = useAuth();
+  const [retrying, setRetrying] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const onLogin = pathname === "/login";
@@ -112,13 +126,26 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (loading) return;
-    if (!user && !onPublic) router.replace("/login");
-    else if (user && onLogin) router.replace(user.must_change_password ? "/profil" : "/");
+    if (!user && !onPublic) {
+      if (!authError) router.replace("/login"); // sunucu hatasında login'e atılmaz: kullanıcı oturum açmış olabilir, hata gösterilir
+    } else if (user && onLogin) router.replace(user.must_change_password ? "/profil" : "/");
     else if (user?.must_change_password && !onProfile) router.replace("/profil");
-  }, [loading, user, onLogin, onPublic, onProfile, router]);
+  }, [loading, user, authError, onLogin, onPublic, onProfile, router]);
 
   if (loading) return <div className="container"><p className="muted" role="status">Oturum kontrol ediliyor…</p></div>;
   if (onPublic) return <>{children}</>;
+  if (!user && authError) {
+    return (
+      <div className="container">
+        <div className="card" role="alert">
+          <h1>⚠️ Sunucuya ulaşılamadı</h1>
+          <p>{authError}</p>
+          <p className="muted small">Oturumunuz kapatılmadı. Bağlantı sorunu geçince tekrar deneyebilirsiniz.</p>
+          <button className="primary" type="button" disabled={retrying} onClick={() => { setRetrying(true); void refresh().finally(() => setRetrying(false)); }}>{retrying ? "Deneniyor…" : "Tekrar dene"}</button>
+        </div>
+      </div>
+    );
+  }
   if (!user) return null;
   if (user.must_change_password && !onProfile) return null;
   if (pathname.startsWith("/yonetim") && user.role !== "yonetici") {

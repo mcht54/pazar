@@ -101,3 +101,47 @@ def test_remember_does_not_weaken_lockout_or_inactive_rules(seeded_db):
     live.is_active = False
     seeded_db.commit()
     assert remembered.get("/api/auth/me").status_code == 401, "pasifleştirilen kullanıcının kalıcı oturumu da geçersiz olur"
+
+
+# --- Üretim çerez ayarları (HTTPS + aynı kök alan adı): Secure / HttpOnly / SameSite / Domain / Path ---
+
+
+def _login_cookie(seeded_db, monkeypatch, **overrides):
+    for key, value in overrides.items():
+        monkeypatch.setattr(settings, key, value)
+    _, r = _login(make_user(seeded_db, "calisan"))
+    return r.headers["set-cookie"]
+
+
+def test_cookie_is_secure_outside_development_and_plain_in_development(seeded_db, monkeypatch):
+    prod = _login_cookie(seeded_db, monkeypatch, env="production")
+    assert "Secure" in prod and "HttpOnly" in prod and "SameSite=lax" in prod and "Path=/" in prod and "Domain" not in prod, prod
+    dev = _login_cookie(seeded_db, monkeypatch, env="development")
+    assert "Secure" not in dev and "HttpOnly" in dev
+
+
+def test_cookie_secure_can_be_overridden_and_samesite_none_forces_secure(seeded_db, monkeypatch):
+    assert "Secure" not in _login_cookie(seeded_db, monkeypatch, env="production", cookie_secure=False), "HTTP ile prod benzeri deneme için kapatılabilir"
+    none = _login_cookie(seeded_db, monkeypatch, env="development", cookie_samesite="none")
+    assert "SameSite=none" in none and "Secure" in none, "SameSite=None Secure olmadan tarayıcıca reddedilir"
+
+
+def test_cookie_domain_is_applied_and_logout_clears_with_same_attributes(seeded_db, monkeypatch):
+    monkeypatch.setattr(settings, "env", "production")
+    monkeypatch.setattr(settings, "cookie_domain", "mchttasarim.com.tr")
+    c, r = _login(make_user(seeded_db, "calisan"))
+    assert "Domain=mchttasarim.com.tr" in r.headers["set-cookie"]
+    out = c.post("/api/auth/logout").headers["set-cookie"]
+    assert "Domain=mchttasarim.com.tr" in out and "Path=/" in out and "Secure" in out and ("Max-Age=0" in out or "expires" in out.lower()), out
+
+
+def test_cookie_settings_parse_from_env_strings():
+    from packages.config import Settings
+
+    assert Settings(cookie_secure="").cookie_secure is None, "COOKIE_SECURE= (boş) = otomatik"
+    assert Settings(cookie_secure="false").cookie_secure is False
+    assert Settings(cookie_samesite="STRICT").cookie_samesite == "strict"
+    import pytest
+
+    with pytest.raises(ValueError):
+        Settings(cookie_samesite="bogus")

@@ -43,6 +43,14 @@ def user_payload(user: User) -> dict:
     }
 
 
+def _cookie_attrs() -> dict:
+    """Oturum çerezinin ortak öznitelikleri (yazarken ve silerken AYNI olmalı; aksi halde tarayıcı çerezi silmeyebilir)."""
+    attrs: dict = {"httponly": True, "samesite": settings.cookie_samesite, "secure": settings.session_cookie_secure, "path": "/"}
+    if settings.cookie_domain:
+        attrs["domain"] = settings.cookie_domain
+    return attrs
+
+
 def _http(exc: auth.AuthError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.detail)
 
@@ -54,10 +62,7 @@ def login(payload: LoginIn, request: Request, response: Response, db: Session = 
     except auth.AuthError as exc:
         raise _http(exc) from exc
     # Beni hatırla: kalıcı çerez (max_age). İşaretsiz: oturum çerezi (tarayıcı kapanınca silinir); sunucu tarafı süre yine geçerlidir.
-    response.set_cookie(
-        auth.COOKIE_NAME, token, max_age=(settings.remember_days * 86400 if payload.remember else None), httponly=True, samesite="lax",
-        secure=settings.env != "development", path="/",
-    )
+    response.set_cookie(auth.COOKIE_NAME, token, max_age=(settings.remember_days * 86400 if payload.remember else None), **_cookie_attrs())
     return user_payload(user)
 
 
@@ -73,7 +78,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     if user:
         log_activity(db, user, "logout", detail="Oturum kapatıldı", ip=client_ip(request), commit=True)
     auth.end_session(db, token)
-    response.delete_cookie(auth.COOKIE_NAME, path="/")
+    response.delete_cookie(auth.COOKIE_NAME, **_cookie_attrs())
     return {"ok": True}
 
 

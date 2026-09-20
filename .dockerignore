@@ -1,0 +1,18 @@
+# Docker build bağlamına gizli/gereksiz dosyalar girmesin (.env imaja veya build bağlamına taşınmaz; env_file ile çalışma anında verilir)
+.git
+.env
+.env.*
+!.env.example
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+node_modules
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+*.dump
+*.pem
+*.log
+.DS_Store
