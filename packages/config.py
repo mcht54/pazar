@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     api_secret_key: str = "change-me-in-real-env"
+    # MCHT Panel giriş senkronu (services/auth/login_sync.py): panelin "Canlı siteler" ekranındaki anahtar. Boşsa uç kapalı (404).
+    panel_sync_secret: str = ""
     api_cors_origins: str = "http://localhost:3000"
     web_base_url: str = "http://localhost:3000"  # e-postadaki şifre bağlantılarının adresi (arayüzün genel adresi)
     session_days: int = 7  # oturum, son kullanımdan itibaren bu kadar gün geçerli (kayan süre)

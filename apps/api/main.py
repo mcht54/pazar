@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from apps.api.routers import admin, analysis, auth, businesses, crm, dashboard, discovery, feed, follow_ups, guides, regions, reports, sales, users
+from apps.api.routers import admin, analysis, auth, businesses, crm, dashboard, discovery, feed, follow_ups, guides, panel_sync, regions, reports, sales, users
 from packages.config import settings
 from packages.db.base import get_db
 
@@ -54,13 +55,16 @@ def _warn_env_misconfiguration() -> None:
 
 CSRF_HEADER = "x-requested-with"
 CSRF_VALUE = "mch-app"
+# MCHT Panel giriş senkronu çerez KULLANMAZ; güvenliği HMAC imzası + zaman + nonce ile sağlanır (services/auth/login_sync.py).
+CSRF_EXEMPT_RE = re.compile(r"^/api/mcht/giris-senkron$")
 
 
 @app.middleware("http")
 async def csrf_guard(request: Request, call_next):
     """CSRF koruması (çerez tabanlı oturum için): değiştirici isteklerde özel başlık zorunludur. Başka bir site bu başlığı
     CORS onayı olmadan gönderemez; SameSite=Lax çerezi ile birlikte çapraz site istek sahteciliğini engeller."""
-    if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/") and request.headers.get(CSRF_HEADER) != CSRF_VALUE:
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/") and request.headers.get(CSRF_HEADER) != CSRF_VALUE \
+            and not CSRF_EXEMPT_RE.match(request.url.path):
         return JSONResponse(status_code=403, content={"detail": "Geçersiz istek kaynağı (CSRF koruması)."})
     return await call_next(request)
 
@@ -85,6 +89,7 @@ app.include_router(follow_ups.router)
 app.include_router(reports.router)
 app.include_router(sales.router)
 app.include_router(feed.router)
+app.include_router(panel_sync.router)
 
 
 @app.get("/api/health")

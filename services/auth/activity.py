@@ -34,6 +34,7 @@ ACTIONS: dict[str, str] = {
     "user_activate": "Kullanıcıyı aktifleştirdi",
     "role_change": "Kullanıcı rolünü değiştirdi",
     "password_reset": "Kullanıcı şifresini sıfırladı",
+    "panel_login_sync": "Giriş bilgisi MCHT Panel'den işlendi",
     "password_change": "Kendi şifresini değiştirdi",
     "api_settings_update": "API ayarlarını güncelledi",
     "api_test": "API bağlantısını test etti",
