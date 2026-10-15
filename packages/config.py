@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     cookie_domain: str = ""  # boş = yalnızca bu host (önerilen). Alt alan adları arası paylaşım gerekmedikçe doldurmayın
 
     anthropic_api_key: str = ""
+    karne_feed_token: str = ""  # MarkaKarnem aday akışı (/api/feed/karne-candidates) için paylaşılan anahtar; boşsa uç kapalı
     google_places_api_key: str = ""
     # Places API (New) Text Search adresi. Yalnızca test/yerel ortamlarda (Google'a istek atmadan sahte sunucuya yönlendirmek için) değiştirilir.
     google_places_search_url: str = "https://places.googleapis.com/v1/places:searchText"

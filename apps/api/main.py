@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from apps.api.routers import admin, analysis, auth, businesses, crm, dashboard, discovery, follow_ups, guides, regions, reports, sales, users
+from apps.api.routers import admin, analysis, auth, businesses, crm, dashboard, discovery, feed, follow_ups, guides, regions, reports, sales, users
 from packages.config import settings
 from packages.db.base import get_db
 
@@ -84,6 +84,7 @@ app.include_router(crm.router)
 app.include_router(follow_ups.router)
 app.include_router(reports.router)
 app.include_router(sales.router)
+app.include_router(feed.router)
 
 
 @app.get("/api/health")
