@@ -392,3 +392,10 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font-size: 14
 .fu-week summary { cursor: pointer; font-weight: 700; font-size: 14px; }
 .fu-list { margin-top: 12px; }
 .pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin: 16px 0; }
+
+/* ---------- MarkaKarnem tanıtımı (kare görsel + paylaşım) ---------- */
+.mk-share { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #f8fafc; }
+.mk-share img { width: 100%; height: auto; border-radius: 8px; display: block; box-shadow: 0 6px 18px rgba(16, 24, 40, 0.18); }
+.mk-share.mk-compact { grid-template-columns: 150px 1fr; }
+.btn-link { display: inline-block; text-decoration: none; background: #fff; color: var(--primary); border: 1px solid var(--primary); padding: 7px 12px; border-radius: 6px; font-size: 13px; }
+@media (max-width: 560px) { .mk-share, .mk-share.mk-compact { grid-template-columns: 1fr; } .mk-share img { max-width: 260px; } }

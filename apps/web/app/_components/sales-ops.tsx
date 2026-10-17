@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { Business, CallToday, CrmState, FollowUpItem, FollowUps, Funnel, PlanOpportunity, Revenue, SalesPlan, SalesSuggestions } from "@/lib/types";
 import { useAuth } from "./auth";
 import { Modal } from "./modal";
+import { MarkaKarnemButton, MarkaKarnemShare } from "./markakarnem";
 import { CONTACT_CHANNELS, CONTACT_RESULTS, CRM_DOTS, FOLLOW_UP_STATE_LABELS, LOST_REASONS, formatFollowUp, formatIstanbul, formatTL, telUrl, whatsappUrl } from "./labels";
 
 const nf = new Intl.NumberFormat("tr-TR");
@@ -30,6 +31,7 @@ export function QuickActions({ business: b }: { business: Business }) {
       {verifiedSite ? <a className="qa-btn" href={verifiedSite} target="_blank" rel="noreferrer">🌐 Web Sitesi</a> : <span className="qa-btn qa-disabled" title="Doğrulanmış web sitesi yok">🌐 Web sitesi doğrulanamadı</span>}
       <a className="qa-btn" href={b.maps_url ?? b.maps_search_url} target="_blank" rel="noreferrer">📍 Google Maps</a>
       {mail ? <a className="qa-btn" href={`mailto:${mail}`}>📧 E-posta</a> : <span className="qa-btn qa-disabled" title="E-posta doğrulanamadı">📧 E-posta yok</span>}
+      <MarkaKarnemButton business={b} />
     </div>
   );
 }
@@ -599,6 +601,7 @@ export function SalesPlanPanel({ business }: { business: Business }) {
           </div>
           <pre className="script-box" id="script-text">{scriptText}</pre>
           <div className="actions"><CopyButton text={scriptText} label="📋 Kopyala" /></div>
+          {(script === "whatsapp" || script === "email") && s.markakarnem && <MarkaKarnemShare text={scriptText} phone={script === "whatsapp" ? business.phone : null} compact />}
           <p className="muted small">{s.caveat} Metin dayanağı: {s.basis}.</p>
         </div>
       )}

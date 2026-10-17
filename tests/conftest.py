@@ -2,7 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
-os.environ["DATABASE_URL"] = f"postgresql+psycopg://{os.getenv('USER', 'postgres')}@localhost:5432/mchttasarim_test"
+# TEST_DATABASE_URL: aynı makinede başka projelerle paylaşılan test veritabanına dokunmadan çalıştırmak için
+os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL") or f"postgresql+psycopg://{os.getenv('USER', 'postgres')}@localhost:5432/mchttasarim_test"
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ["DISCOVERY_PROVIDER"] = "mock"
 os.environ["AI_PROVIDER"] = "none"
