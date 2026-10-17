@@ -565,3 +565,15 @@ def test_contact_attempts_feed_call_priority_and_reports(client, db):
     assert m["contacts"] == 1, "aynı firmaya birden çok deneme dönemde tek firma olarak sayılır"
     me = next(r for r in client.get("/api/sales/staff?period=today").json()["items"] if r["name"] == "Test Yönetici")
     assert me["contacts"] == 3 and me["unreachable"] == 3, "personel bazında her deneme ayrı sayılır"
+
+
+def test_scripts_carry_markakarnem_invitation_with_prefilled_link():
+    from services.sales.scripts import markakarnem_link
+
+    s = build_scripts(business_name="Deneme & Klinik", sector_name=None, place="Serdivan", matrix=MATRIX, staff_name=None)
+    link = "https://markakarnem.com.tr/analiz?q=Deneme+Klinik+Serdivan&k=pazar"
+    assert markakarnem_link("Deneme & Klinik", "Serdivan") == link, "URL'yi bozan işaretler atılır, boşluk + olur"
+    assert link in s["whatsapp"] and link in s["email"]["body"] and s["markakarnem"]["link"] == link
+    assert s["whatsapp"].index("Doğrulanmış bir web sitesi") < s["whatsapp"].index("markakarnem.com.tr"), "asıl mesaj önce, tanıtım altta"
+    assert "ücretsiz" in s["markakarnem"]["text"] and "garanti" not in s["markakarnem"]["text"].lower()
+    assert markakarnem_link("Çiçekçi Şule", None).endswith("q=Çiçekçi+Şule&k=pazar")

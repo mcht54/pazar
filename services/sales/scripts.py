@@ -8,6 +8,21 @@ KURALLAR (dürüstlük)
 """
 
 MAX_FACTS = 2
+MARKAKARNEM_URL = "https://markakarnem.com.tr"
+
+
+def markakarnem_link(business_name: str, place: str | None) -> str:
+    """İşletmenin adıyla doldurulmuş MarkaKarnem analiz bağlantısı (açılınca işletme kendiliğinden aranır; k=pazar kaynağı sayar).
+    Türkçe harfler olduğu gibi bırakılır (WhatsApp ve tarayıcılar destekler); boşluk "+" olur, URL'yi bozan işaretler atılır."""
+    q = " ".join(f"{business_name} {place or ''}".translate({ord(c): " " for c in "&#?%+/=\\"}).split())
+    return f"{MARKAKARNEM_URL}/analiz?q={q.replace(' ', '+')}&k=pazar"
+
+
+def markakarnem_text(business_name: str, place: str | None) -> str:
+    """Mesajlara eklenen MarkaKarnem tanıtımı. Ücretsizdir; sonuç ya da sıralama vaadi içermez."""
+    return ("Ayrıca işletmenizin dijital karnesini 1 dakikada ücretsiz görebilirsiniz: web siteniz, Google profiliniz ve Instagram'ınız "
+            "52 kontrolle ölçülür, yakınınızdaki rakiplerle kıyaslanır. Kart bilgisi gerekmez.\n"
+            f"👉 {markakarnem_link(business_name, place)}")
 
 
 def _verified_facts(matrix: dict | None, limit: int = MAX_FACTS) -> list[dict]:
@@ -69,6 +84,8 @@ def build_scripts(*, business_name: str, sector_name: str | None, place: str | N
         wa += f" {facts[0]['detail']} Bu konuda ücretsiz kısa bir görüşme yapmak ister misiniz?"
     else:
         wa += f" {services_text} konusunda destek almayı düşünür müsünüz? Uygunsanız kısa bir görüşme planlayabiliriz."
+    karne = markakarnem_text(business_name, place)
+    wa += "\n\n" + karne
 
     # --- e-posta
     body = ["Merhaba,", "", f"Ben {me}, {company} ekibindenim. {business_name}{where} için genel bir dijital inceleme yaptık."]
@@ -77,7 +94,7 @@ def build_scripts(*, business_name: str, sector_name: str | None, place: str | N
         body += ["", f"Bu konularda {services_text} alanında somut öneriler hazırlayabiliriz."]
     else:
         body += ["", f"{services_text.capitalize()} konusunda işletmenize uygun olabilecek çalışmalarımızı paylaşmak isteriz. Bu alanda şu an destek alıp almadığınızı öğrenmek isteriz."]
-    body += ["", "Uygun bir zamanda kısa bir görüşme yapabilir miyiz?", "", "İyi çalışmalar,", me, company]
+    body += ["", "Uygun bir zamanda kısa bir görüşme yapabilir miyiz?", "", karne, "", "İyi çalışmalar,", me, company]
     email = {"subject": f"{business_name} için dijital inceleme notlarımız" if facts else f"{business_name} — {services_text} hakkında", "body": "\n".join(body)}
 
     # --- kısa not (personel içi)
@@ -85,5 +102,6 @@ def build_scripts(*, business_name: str, sector_name: str | None, place: str | N
     return {
         "call": "\n".join(call), "whatsapp": wa, "email": email, "short_note": note,
         "facts_used": facts, "basis": basis,
+        "markakarnem": {"text": karne, "link": markakarnem_link(business_name, place), "image": "/markakarnem-kare.jpg"},
         "caveat": "Metinlerde yalnızca doğrulanmış bulgular olgu olarak geçer; gönderiminden önce kontrol edin ve gerekirse kendi üslubunuza uyarlayın.",
     }

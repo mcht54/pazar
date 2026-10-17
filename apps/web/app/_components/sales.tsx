@@ -10,6 +10,7 @@ import { patchStoredBusiness } from "./search-store";
 
 export { Modal } from "./modal";
 import { Modal } from "./modal";
+import { MarkaKarnemButton } from "./markakarnem";
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -519,6 +520,7 @@ export function QuickActions({ business, website, onSalesNote, onGuides, onAddTo
       {canSalesNote && <button className="qa-btn" onClick={onSalesNote} disabled={business.sales_level === null}>✍️ Satış Notu</button>}
       <button className="qa-btn" onClick={onGuides} disabled={business.sales_level === null}>💡 Nasıl Çözülür?</button>
       <button className="qa-btn" onClick={onAddToCrm}>{business.in_crm ? "📋 CRM Durumu" : "➕ CRM'e Ekle"}</button>
+      <MarkaKarnemButton business={business} />
     </div>
   );
 }

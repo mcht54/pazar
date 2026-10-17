@@ -672,7 +672,8 @@ export interface SalesPlan {
   package?: { services: string[]; priced: { service: string; label: string }[]; unpriced: string[]; min: number | null; max: number | null; default: number | null; label: string; disclaimer: string };
   providers?: { items: ProviderItem[]; win_opportunities: { service: string; provider: string | null; source: string; text: string }[] };
   cross_check_flags?: { field: string; note: string | null; sources: { label: string; value: string }[] }[];
-  scripts?: { call: string; whatsapp: string; email: { subject: string; body: string }; short_note: string; facts_used: { service: string; text: string; detail: string }[]; basis: string; caveat: string };
+  scripts?: { call: string; whatsapp: string; email: { subject: string; body: string }; short_note: string; facts_used: { service: string; text: string; detail: string }[]; basis: string; caveat: string;
+    markakarnem?: { text: string; link: string; image: string } };
   why_prospect?: string[];
 }
 
