@@ -8,6 +8,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "services.worker.tasks.discovery",
+        "services.worker.tasks.auto_discovery",
         "services.worker.tasks.analysis",
         "services.worker.tasks.proposal",
         "services.worker.tasks.reporting",

@@ -161,9 +161,11 @@ def run_discovery_job(
     db: Session,
     discovery_job_id: int,
     on_new_businesses: Callable[[list[int]], None] | None = None,
+    provider=None,
 ) -> DiscoveryJob:
     """on_new_businesses: her veri grubu DB'ye yazılıp commit edildikçe, o gruptaki işletme
-    id'leriyle çağrılır (worker burada analizi kuyruğa alır; testler vermez)."""
+    id'leriyle çağrılır (worker burada analizi kuyruğa alır; testler vermez).
+    provider: verilmezse DISCOVERY_PROVIDER ayarındaki sağlayıcı (otomatik keşif resmi Places API'yi zorlar)."""
     job = db.get(DiscoveryJob, discovery_job_id)
     if job is None:
         raise ValueError(f"DiscoveryJob {discovery_job_id} bulunamadı")
@@ -196,7 +198,7 @@ def run_discovery_job(
         db.commit()
         return job
 
-    provider = get_places_provider(db)
+    provider = provider or get_places_provider(db)
 
     counters = {"found_new": 0, "found_existing": 0}
     item_errors: list[dict] = []
