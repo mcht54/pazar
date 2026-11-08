@@ -8,7 +8,8 @@ Kurallar:
   çalıştırılmaz: Google'ın kullanım şartları otomatik erişime izin vermez, o yol yalnızca personelin kendi aramasıdır.
 - Anahtar (GOOGLE_PLACES_API_KEY) yoksa hiçbir şey yapılmaz, nedeni açıkça döner. Günlük istek sınırı integrations_registry'den okunur.
 - Sıra: hiç taranmamış ilçe + sektör ikilileri önce, sonra en uzun süredir taranmamış olan; eşitlikte rastgele (her gün farklı bölge/sektör).
-- Kapsam: Pazar'ın zaten çalıştığı illerin ilçeleri ve aktif sektörler (rakip ajans sektörleri hariç).
+- Kapsam: Pazar'ın asıl çalıştığı illerin (işletmelerin en az %20'si) ilçeleri ve aktif sektörler (rakip ajans sektörleri hariç).
+  Tek tük araması yapılmış iller taranmaz: Haftanın 1.si aynı il + sektörde en az 3 işletme ister, dağınık tarama grup oluşturmaz.
 - Bulunan işletmeler için Pazar'ın tarayıcılı ek araştırması otomatik başlatılmaz; MarkaKarnem kendi analizini yapar.
 """
 
@@ -26,6 +27,7 @@ from services.worker.celery_app import celery_app
 REQUESTED_BY = "otomatik keşif (MarkaKarnem)"
 TARGET_COUNT = 60  # Text Search en fazla ~60 sonuç (3 sayfa) verir
 MAX_PER_RUN = 3
+MAIN_IL_SHARE = 0.2  # bir ilin kapsama girmesi için Pazar'daki işletmelerden aldığı en düşük pay
 AGENCY_TERMS = ("ajans", "reklam", "web tasarım", "dijital pazarlama", "sosyal medya", "seo", "yazılım")
 
 
@@ -37,12 +39,16 @@ def available() -> str | None:
 
 
 def _scope_regions(db: Session) -> list[Region]:
-    """Pazar'ın çalıştığı illerin ilçeleri (ilçesi tanımlı olmayan ilde ilin kendisi)."""
-    used = {rid for (rid,) in db.query(Business.region_id).distinct()}
-    if not used:
+    """Pazar'ın asıl çalıştığı illerin ilçeleri (ilçesi tanımlı olmayan ilde ilin kendisi)."""
+    counts = dict(db.query(Business.region_id, func.count(Business.id)).group_by(Business.region_id).all())
+    if not counts:
         return []
-    regions = db.query(Region).filter(Region.id.in_(used)).all()
-    il_ids = {r.parent_region_id if r.level == "ilce" else r.id for r in regions}
+    per_il: dict[int, int] = {}
+    for r in db.query(Region).filter(Region.id.in_(counts)).all():
+        il_id = r.parent_region_id if r.level == "ilce" else r.id
+        per_il[il_id] = per_il.get(il_id, 0) + counts[r.id]
+    total = sum(per_il.values())
+    il_ids = {il_id for il_id, n in per_il.items() if n >= total * MAIN_IL_SHARE}
     ilceler = db.query(Region).filter(Region.level == "ilce", Region.parent_region_id.in_(il_ids)).all()
     with_ilce = {r.parent_region_id for r in ilceler}
     return ilceler + [r for r in db.query(Region).filter(Region.id.in_(il_ids - with_ilce)).all()]
