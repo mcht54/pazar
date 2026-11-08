@@ -5,16 +5,19 @@ MarkaKarnem'in "Günün fırsatı" ve "Haftanın 1.si" seçimleri için Pazar'ı
 - Paylaşılan gizli anahtarla korunur (KARNE_FEED_TOKEN, başlık: X-Feed-Token). Anahtar tanımlı değilse uç kapalıdır (404).
 - CRM'e eklenmiş firmalar (müşteri, teklif, aranacak…) ve rakip ajanslar listeye hiç girmez: onlara fırsat mesajı gitmemeli.
 - E-posta, personel notu, teklif/satış tutarı gibi iç alanlar verilmez.
+
+POST /api/feed/karne-discover: aynı anahtarla, sıradaki ilçe + sektör ikilileri için resmi Google Places API ile yeni işletme
+araması kuyruğa alınır (bkz. services/worker/tasks/auto_discovery.py). Havuz her gün büyür; MarkaKarnem aynı firmalara takılmaz.
 """
 
 import hmac
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 
 from packages.config import settings
 from packages.db.base import get_db
-from packages.db.models import Business, Region
+from packages.db.models import Business, Region, Sector
 
 router = APIRouter(prefix="/api/feed", tags=["markakarnem-akış"])
 AGENCY_TERMS = ("ajans", "reklam", "web tasarım", "dijital pazarlama", "sosyal medya yönetimi", "seo hizmet", "yazılım")
@@ -68,3 +71,24 @@ def karne_candidates(
             "last_review_at": b.last_review_at.isoformat() if b.last_review_at else None,
         })
     return {"items": items}
+
+
+@router.post("/karne-discover", status_code=status.HTTP_202_ACCEPTED)
+def karne_discover(
+    count: int = Query(2, ge=1, le=3),
+    x_feed_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    from services.worker.tasks import auto_discovery
+
+    _authorized(x_feed_token)
+    if (why := auto_discovery.available()):
+        raise HTTPException(status_code=503, detail=why)
+    jobs = auto_discovery.plan(db, count)
+    if jobs:
+        auto_discovery.auto_discovery_task.delay([j.id for j in jobs])
+    planned = []
+    for j in jobs:
+        il, ilce = _place(db.get(Region, j.region_id))
+        planned.append({"job_id": j.id, "il": il, "ilce": ilce, "sector": db.get(Sector, j.sector_id).name})
+    return {"queued": planned}
