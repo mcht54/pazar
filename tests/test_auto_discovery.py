@@ -105,3 +105,16 @@ def test_run_uses_official_places_provider(seeded_db, monkeypatch):
                         lambda _db: (_ for _ in ()).throw(AssertionError("ayardaki tarayıcılı sağlayıcı kullanılmamalı")))
     assert auto_discovery.run(db, [job.id]) == ["completed"]
     assert used and db.query(Business).filter_by(google_place_id="google_yeni1").one().google_review_count == 120
+
+
+def test_scope_is_limited_to_main_provinces(seeded_db):
+    db = seeded_db
+    anchor = _anchor(db)
+    sector = db.query(Sector).filter_by(name="İşitme Cihazı Merkezi").one()
+    for n in range(4):  # Sakarya'da 5 işletme
+        db.add(Business(name=f"S{n}", sector_id=sector.id, region_id=anchor.id, google_place_id=f"p_s{n}", discovery_source="google_places", status="analyzed"))
+    other = db.query(Region).filter(Region.level == "il", Region.id != anchor.parent_region_id).first()
+    db.add(Business(name="Uzak", sector_id=sector.id, region_id=other.id, google_place_id="p_uzak", discovery_source="google_places", status="analyzed"))
+    db.commit()
+    il_ids = {r.parent_region_id if r.level == "ilce" else r.id for r in auto_discovery._scope_regions(db)}
+    assert il_ids == {anchor.parent_region_id}, "tek işletmeli il (%17) taranmaz"
