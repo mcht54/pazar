@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     karne_feed_token: str = ""  # MarkaKarnem aday akışı (/api/feed/karne-candidates) için paylaşılan anahtar; boşsa uç kapalı
+    # MarkaKarnem otomatik keşfi (resmi Places API): yalnızca bu ilin ilçeleri; Google ücretsiz kotası aşılmasın diye günlük/aylık kesin sınır
+    karne_discover_il: str = "Sakarya"
+    karne_discover_daily_jobs: int = 2
+    karne_discover_monthly_requests: int = 150
     google_places_api_key: str = ""
     # Places API (New) Text Search adresi. Yalnızca test/yerel ortamlarda (Google'a istek atmadan sahte sunucuya yönlendirmek için) değiştirilir.
     google_places_search_url: str = "https://places.googleapis.com/v1/places:searchText"

@@ -82,8 +82,9 @@ def karne_discover(
     from services.worker.tasks import auto_discovery
 
     _authorized(x_feed_token)
-    if (why := auto_discovery.available()):
-        raise HTTPException(status_code=503, detail=why)
+    allowed, why = auto_discovery.allowance(db)
+    if not allowed:
+        raise HTTPException(status_code=503 if "GOOGLE_PLACES_API_KEY" in why else 429, detail=why)
     jobs = auto_discovery.plan(db, count)
     if jobs:
         auto_discovery.auto_discovery_task.delay([j.id for j in jobs])

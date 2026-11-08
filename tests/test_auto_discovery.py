@@ -44,7 +44,7 @@ def test_discover_queues_jobs_for_distinct_sectors_in_scope(seeded_db, monkeypat
     r = TestClient(app).post("/api/feed/karne-discover?count=3", headers=HEADERS)
     assert r.status_code == 202, r.text
     queued = r.json()["queued"]
-    assert len(queued) == 3 and len({q["sector"] for q in queued}) == 3, "aynı çalıştırmada her sektör bir kez"
+    assert len(queued) == 2 and len({q["sector"] for q in queued}) == 2, "günlük sınır (2) içinde, her sektör bir kez"
     assert all(q["il"] == anchor.parent.name for q in queued), "yalnızca Pazar'ın çalıştığı ilin ilçeleri"
     assert not any("ajans" in q["sector"].casefold() or "reklam" in q["sector"].casefold() for q in queued)
     assert sent == [[q["job_id"] for q in queued]]
@@ -68,9 +68,11 @@ def test_next_combos_prefers_never_scanned_then_oldest(seeded_db):
         assert s.id == first[1].id, "hiç taranmamış ikili önce gelir"
 
 
-def test_consecutive_days_get_different_combos(seeded_db):
+def test_consecutive_days_get_different_combos(seeded_db, monkeypatch):
     db = seeded_db
     _anchor(db)
+    monkeypatch.setattr(settings, "google_places_api_key", "anahtar")
+    monkeypatch.setattr(settings, "karne_discover_daily_jobs", 100)
     seen = set()
     for _day in range(5):
         jobs = auto_discovery.plan(db, 2)
@@ -82,6 +84,7 @@ def test_consecutive_days_get_different_combos(seeded_db):
 def test_run_uses_official_places_provider(seeded_db, monkeypatch):
     db = seeded_db
     _anchor(db)
+    monkeypatch.setattr(settings, "google_places_api_key", "anahtar")
     job = auto_discovery.plan(db, 1)[0]
     used = []
 
@@ -107,14 +110,40 @@ def test_run_uses_official_places_provider(seeded_db, monkeypatch):
     assert used and db.query(Business).filter_by(google_place_id="google_yeni1").one().google_review_count == 120
 
 
-def test_scope_is_limited_to_main_provinces(seeded_db):
+
+def test_scope_is_only_the_configured_province(seeded_db, monkeypatch):
     db = seeded_db
     anchor = _anchor(db)
-    sector = db.query(Sector).filter_by(name="İşitme Cihazı Merkezi").one()
-    for n in range(4):  # Sakarya'da 5 işletme
-        db.add(Business(name=f"S{n}", sector_id=sector.id, region_id=anchor.id, google_place_id=f"p_s{n}", discovery_source="google_places", status="analyzed"))
     other = db.query(Region).filter(Region.level == "il", Region.id != anchor.parent_region_id).first()
-    db.add(Business(name="Uzak", sector_id=sector.id, region_id=other.id, google_place_id="p_uzak", discovery_source="google_places", status="analyzed"))
+    db.add(Business(name="Uzak", sector_id=db.query(Sector).first().id, region_id=other.id, google_place_id="p_uzak", discovery_source="google_places",
+                    status="analyzed"))
     db.commit()
-    il_ids = {r.parent_region_id if r.level == "ilce" else r.id for r in auto_discovery._scope_regions(db)}
-    assert il_ids == {anchor.parent_region_id}, "tek işletmeli il (%17) taranmaz"
+    il_ids = {r.parent_region_id or r.id for r in auto_discovery._scope_regions(db)}
+    assert il_ids == {anchor.parent_region_id}, "varsayılan: yalnızca Sakarya ilçeleri; başka ilde işletme olsa da taranmaz"
+    monkeypatch.setattr(settings, "karne_discover_il", other.name)
+    assert {r.parent_region_id or r.id for r in auto_discovery._scope_regions(db)} == {other.id}
+
+
+def test_daily_and_monthly_limits_stop_discovery_before_calling_google(seeded_db, monkeypatch):
+    from datetime import date
+
+    from packages.db.models import ApiUsageLedger
+
+    db = seeded_db
+    _anchor(db)
+    monkeypatch.setattr(settings, "karne_feed_token", "t" * 40)
+    monkeypatch.setattr(settings, "google_places_api_key", "anahtar")
+    monkeypatch.setattr(auto_discovery.auto_discovery_task, "delay", lambda ids: None)
+    c = TestClient(app)
+    assert len(c.post("/api/feed/karne-discover?count=3", headers=HEADERS).json()["queued"]) == 2, "günde en fazla 2 arama"
+    r = c.post("/api/feed/karne-discover", headers=HEADERS)
+    assert r.status_code == 429 and "Bugünkü" in r.json()["detail"]
+    assert auto_discovery.plan(db, 3) == []
+    db.query(DiscoveryJob).delete()
+    month = date.today().isoformat()
+    for _ in range(settings.karne_discover_monthly_requests - 1):
+        db.add(ApiUsageLedger(integration_name="google_places", endpoint="places:searchText", quota_period=month))
+    db.commit()
+    r = c.post("/api/feed/karne-discover", headers=HEADERS)
+    assert r.status_code == 429 and "ayın" in r.json()["detail"], "kalan 1 istek bir aramaya (2 istek) yetmez"
+    assert db.query(DiscoveryJob).count() == 0
